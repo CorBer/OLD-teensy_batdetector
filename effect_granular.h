@@ -46,8 +46,16 @@ public:
 	void beginTimeExpansion(float grain_length) {
 		if (grain_length <= 0.0) return;
 		beginTimeExpansion_int(grain_length);
+		
 	}
 	
+    void stopTimeExpansion()
+	 {
+		 sample_loaded=true;
+		 //sample_req=false;
+
+	 }
+
 	void beginDivider(float grain_length) {
 		if (grain_length <= 0.0) return;
 		beginDivider_int(grain_length);
@@ -71,6 +79,8 @@ private:
 	int16_t freeze_len;
 	int16_t prev_input;
 	int16_t glitch_len;
+
+    bool play_sample;
 	bool allow_len_change;
 	bool sample_loaded;
 	bool write_en;

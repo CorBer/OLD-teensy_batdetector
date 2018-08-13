@@ -89,6 +89,7 @@ void AudioEffectGranular::beginTimeExpansion_int(int grain_samples)
 void AudioEffectGranular::beginDivider_int(int grain_samples)
 {
 	__disable_irq();
+	read_head=0;
 	grain_mode = 4;
 	if (allow_len_change) {
 		if (grain_samples > max_sample_len) {
@@ -112,7 +113,7 @@ void AudioEffectGranular::stop()
 void AudioEffectGranular::update(void)
 {
 	audio_block_t *block;
-
+	
 	if (sample_bank == NULL) {
 		block = receiveReadOnly(0);
 		if (block) release(block);
@@ -120,6 +121,7 @@ void AudioEffectGranular::update(void)
 	}
 
 	block = receiveWritable(0);
+	
 	if (!block) return;
 
 	if (grain_mode == 0) {
@@ -247,92 +249,95 @@ void AudioEffectGranular::update(void)
 	} 
 	else if (grain_mode == 3) {
 		//TIME EXPANSION
-		int8_t subsample=0;
 		for (int k = 0; k < AUDIO_BLOCK_SAMPLES; k++) 
 		 { 
+			// if a sample is requested
 			// wait with recording until a crossing zero point passes
 			if (sample_req) {
-				int16_t current_input = block->data[k];
+				write_en = true; //start collecting a sample by setting write_enabled
+				write_head=0; //start at position 0
+				read_head=0;
+				/*int16_t current_input = block->data[k];
 				if ((current_input < 0 && prev_input >= 0) ||
 				  (current_input >= 0 && prev_input < 0)) {
-					write_en = true; //start collecting a sample
+					write_en = true; //start collecting a sample by setting write_enabled
+					write_head=0; //start at position 0
+					read_head=0;
 				} else {
 					prev_input = current_input;
-				}
+				}*/
+
 			}
 
-        //active collecting of all incoming data
+            //active collecting of all incoming data if write_enabled
 			if (write_en) {
-				sample_req = false;
-				allow_len_change = true; 
+				sample_req = false; // stop sample request as we are recording
+				
 				// collect until glitch_len samples are available in the sample_bank
 				if (write_head >= glitch_len) {
-					write_head = 0;
-					accumulator= 0;
-					
+					//write_head = 0;
+					//accumulator= 0;
 					sample_loaded = true; //sample_bank is full 
-					write_en = false;
-					allow_len_change = false;
+					write_en = false; // stop sampling
 				}
+
+				play_sample=true;
 				sample_bank[write_head]= block->data[k];
 				write_head++; // next sample
 			   
 			}
 
-        //sample bank is full and can be used to transfer back to the audio system
+            //sample bank is full and can be used to transfer back to the audio system
 			if (sample_loaded) {
 				
 			}
-         //playback_rate is 65536 for sample_ratio 1 (no decimation)
+            //playback_rate is 65536 for sample_ratio 1 (no decimation)
 			//accumulator holds next position of the sample*65535 
 			// read_head is the position of the next sample to use in the sample_bank
 			// if sample_ration <1 the sample_value will be pushed into the bank several times (time expansion)
 
-			accumulator += playpack_rate; // sample 
-			read_head = (accumulator >> 16); //rightshift 16 == div by 65535 
-
-			if (read_head >= glitch_len) {
+			if (play_sample)
+			 { accumulator += playpack_rate; // shift sampleposition
+			   read_head = (accumulator >> 16); //rightshift 16 == div by 65535 
+			 }
+			 
+			//glitch_len equals array_size
+			if (read_head >= write_head) {
 				read_head = 0;
 				accumulator = 0;
-            sample_req = true; //we can have a new sample coming in
+                sample_req = false; //we dont want a new sample
 				sample_loaded = false;
-				
+				play_sample=false;
 			}
          
 			block->data[k] = sample_bank[read_head];
-			 
 			
 		}
 	} 
 	else if (grain_mode == 4) {
-		//DIVIDER
-		int8_t subsample=0;
-		int16_t current_input=block->data[0];
-		float collector=0;
-		int16_t samples[10];
+		//FREQUENCY DIVIDER
+		// todo: change into continous averaged sampling by adding a new block->data and removing the oldest from the samples
+		//       array. Average calculation can be done as new_average = last_average - oldest_data*0.1 + latest_data*0.1
+        uint8_t dividerset=20;
+		float dividermult =1/dividerset;
+	    float averaged_sample=0;
+		//first calculate the current averaged_sample in the sample_bank
+		/*for (int k = 0; k < dividerset; k++) 
+            { averaged_sample+=sample_bank[k];
+			 }
+        */
+		uint16_t old_sample;
+		
 		for (int k = 0; k < AUDIO_BLOCK_SAMPLES; k++) 
-		 { 
-			 //collect the last 10 samples
-			 samples[subsample%10]=block->data[k];
-			 subsample++;
-			 // wait with pushing averaged samples until 10 are collected
-			 if (subsample<10)
-                {current_input = block->data[0];
-					  }
-			 else
-			   {  collector=0;
-					for (uint8_t i=0; i<10; i++)
-					  {
-						  collector+=samples[i];
-					  }
-					current_input=collector/10;  
-				}		  
-			 
-			block->data[k] = current_input;
-			 
-			
+		 {   
+			// old_sample=sample_bank[k%dividerset]; // take previous readout at this position
+			 sample_bank[k%dividerset]= block->data[k];  //store current readout 
+	        // averaged_sample=averaged_sample+block->data[k]-old_sample;
+			 block->data[k] = sample_bank[0]; //gets updated every X samples
+						
 		}
-	} 
+	  } 
+
 	transmit(block);
 	release(block);
 }
