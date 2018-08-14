@@ -1,21 +1,56 @@
 
 /***********************************************************************
- *  (c) 2016  
- *      
- *  https://forum.pjrc.com/threads/38988-Bat-detector
- *         
- *        made possible by the samplerate code by Frank Boesing, thanks Frank!
+ *  TEENSY 3.6 BAT DETECTOR V0.1 20180814
  * 
- *  tested on Teensy 3.5 + Teensy Audio board 
- *  + standard tiny electret MIC soldered to the MIC Input of the audio board 
+ *  Copyright (c) 2018, Cor Berrevoets, registax@gmail.com
  *  
- *  needs the new version of the SD library by Paul Stoffregen (newer than 2016_11_01)
+ *  TODO: use selectable presets
+ * 
+ *  HARDWARE USED:
+ *     TEENSY 3.6
+ *     TEENSY audio board
+ *     Ultrasonic microphone with seperate preamplifier connected to mic/gnd on audioboard
+ *       eg. Knowles MEMS SPU0410LR5H-QB 
+ *     TFT based on ILI9341
+ *     2 rotary encoders with pushbutton
+ *     2 pushbuttons
+ *     SDCard
+ * 
+*   IMPORTANT: uses the SD card slot of the Teensy, NOT the SD card slot of the audio board 
+ * 
+ *  4 operational modes: Heterodyne.
+ *                       Frequency divider
+ *                       Automatic heterodyne (1/10 implemented)
+ *                       Automatic TimeExpansion (live)
+ *
+ *  Sample rates up to 352k
  *  
- *  uses the SD card slot of the Teensy, NOT the SD card slot of the audio board  
- *  use an old SD card, preferably 2GB, no HC or class 10 
- *        en
- * Audio sample rate code - function setI2SFreq  
- * Copyright (c) 2016, Frank Bösing, f.boesing@gmx.de
+ *  User controlled parameters:
+ *     Volume
+ *     Gain
+ *     Frequency
+ *     Display (none, spectrum, waterfall)
+ *     Samplerate
+ *     
+ *  Record raw data
+ *  Play raw data (user selectable) on the SDcard using time_expansion (8, 11, 16,22,32,44k samplerate )
+ * 
+ * 
+ *  Fixes compared to original base:
+ *    - issue during recording due to not refilling part of the buffer (was repeating the original first 256 samples )
+ *    - filenames have samplerate stored
+ *    - RTC added (based on hardware)
+ * 
+ * **********************************************************************
+ *   Based on code by DD4WH 
+ * 
+ *   https://forum.pjrc.com/threads/38988-Bat-detector
+ *   
+ *   https://github.com/DD4WH/Teensy-Bat-Detector
+ *         
+ *   made possible by the samplerate code by Frank Boesing, thanks Frank!
+ *   Audio sample rate code - function setI2SFreq  
+ *   Copyright (c) 2016, Frank Bösing, f.boesing@gmx.de
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,29 +70,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  * 
- * NEW:
- * - uses the uSDFS lib for recording and SD lib for playback
- * - time expansion playback enabled (new sample rates 8k to 32k implemented): 
- *     Try recording a shaken keyring at 96k and playback at 16k, sounds like tons of heavy steel ;-)
- * - waterfall display by Frank B
- * 
- * TODO: 
- * - fix ticking noise issue with "newer" SD cards
- * - implement proper menu for time expansion playback (just choose the time expansion factor)/CORB Done
- * - file names with sample rate indicator/CORB done
- * - display file names for playback/CORB done
- * - menu to choose which file to playback/CORB done
- * - realtime frequency translation of the whole spectrum (no idea how to do this efficiently: maybe just by downsampling???)
- * - activate realtime clock for accurate time/date stamps on recordings/CorB DONE
- * - proper documentation/manual ?
- */
+ **********************************************************************/
 
-/* additions CORBEE */
-/* TEENSY 3.6 PINSETUP
+/* CORBEE */
+/* TEENSY 3.6 PINSETUP (20180814)
 
-                  GND                 Vin  - PREAMP MIC
+                  GND                  Vin  - PREAMP V+
                    0                   Analog GND
-                   1                   3.3V (250mA0
+                   1                   3.3V - MEMS MIC
                    2                   23 AUDIO -LRCLK
                    3                   22 AUDIO -TX
                    4                   21 TFT CS
@@ -72,7 +92,7 @@
                   3.3V                GND
                   24                  A22
                   25                  A21
-       TFTTouchCS 26                  39  TFT MISO
+                  26                  39  TFT MISO
         TFT SCLK  27                  38  MICROPUSH_L
         TFT MOSI  28                  37  MICROPUSH_R
      ENC_L-BUTTON 29                  36  ENC_R-BUTTON
@@ -97,22 +117,21 @@
 
 boolean SD_ACTIVE=false;
 boolean continousPlay=false;
-boolean batTrigger=false;
+boolean batTrigger=false;//triggers when an ultrasonic signalpeak is found during FFT
 boolean TE_ready=true; //when a TEcall is played this signals the end of the call
 
 #ifdef USESD
- #include <SD.h>
- #include "ff.h"       // uSDFS lib
- #include "ff_utils.h" // uSDFS lib
- File root;
- SdFile filer;
- #define MAX_FILES    50
- #define MAX_FILE_LENGTH  13   // 8 chars plus 4 for.RAW plus NULL
- char filelist[ MAX_FILES ][ MAX_FILE_LENGTH ];
- int filecounter=0;
- int fileselect=0;
- int referencefile=0;
-
+  #include <SD.h>
+  #include "ff.h"       // uSDFS lib
+  #include "ff_utils.h" // uSDFS lib
+  File root;
+  SdFile filer;
+  #define MAX_FILES    50
+  #define MAX_FILE_LENGTH  13   // 8 chars plus 4 for.RAW plus NULL
+  char filelist[ MAX_FILES ][ MAX_FILE_LENGTH ];
+  int filecounter=0;
+  int fileselect=0;
+  int referencefile=0;
 #endif
 
 time_t getTeensy3Time()
@@ -142,8 +161,7 @@ uint32_t lastmicros;
  #ifdef ILI9341
   #include "ILI9341_t3.h"
   #include "font_Arial.h"
-  //#include "XPT2046_Touchscreen.h"
-
+  
   #define BACKLIGHT_PIN 255
   #define TOP_OFFSET 90
   #define BOTTOM_OFFSET 20
@@ -162,7 +180,6 @@ uint32_t lastmicros;
  #endif
 
 #endif
-
 
 
 // this audio comes from the codec by I2S2
@@ -224,7 +241,7 @@ int16_t granularMemory[GRANULAR_MEMORY_SIZE];
 
 // forward declaration Stop recording with dying message 
 #ifdef DEBUGSERIAL
-void die(char *str, FRESULT rc);
+   void die(char *str, FRESULT rc);
 #endif
 
 extern "C" uint32_t usd_getError(void);
