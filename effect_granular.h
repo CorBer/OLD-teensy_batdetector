@@ -32,7 +32,14 @@ public:
 		if (ratio < 0.01) ratio = 0.01;
 		else if (ratio > 8.0) ratio = 8.0;
 		playpack_rate = ratio * 65536.0 + 0.499;
+
 	}
+	void setdivider(int ratio) {
+		if (ratio < 1) ratio = 1;
+		else if (ratio > 50) ratio = 50;
+		Rdivider=1/ratio;
+	}
+	
 	void beginFreeze(float grain_length) {
 		if (grain_length <= 0.0) return;
 		beginFreeze_int(grain_length * (AUDIO_SAMPLE_RATE_EXACT * 0.001) + 0.5);
@@ -71,6 +78,7 @@ private:
 	audio_block_t *inputQueueArray[1];
 	int16_t *sample_bank;
 	uint32_t playpack_rate;
+	float Rdivider;
 	uint32_t accumulator;
 	int16_t max_sample_len;
 	int16_t write_head;
@@ -79,6 +87,7 @@ private:
 	int16_t freeze_len;
 	int16_t prev_input;
 	int16_t glitch_len;
+	int32_t divider_sample;
 
     bool play_sample;
 	bool allow_len_change;

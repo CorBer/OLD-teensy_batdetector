@@ -83,12 +83,14 @@ void AudioEffectGranular::beginTimeExpansion_int(int grain_samples)
 	sample_loaded = false;
 	write_en = false;
 	sample_req = true;
+
 	__enable_irq();
 }
 
 void AudioEffectGranular::beginDivider_int(int grain_samples)
 {
 	__disable_irq();
+	divider_sample=0; //samplecounter
 	read_head=0;
 	grain_mode = 4;
 	if (allow_len_change) {
@@ -291,16 +293,20 @@ void AudioEffectGranular::update(void)
 			if (sample_loaded) {
 				
 			}
-            //playback_rate is 65536 for sample_ratio 1 (no decimation)
-			//accumulator holds next position of the sample*65535 
-			// read_head is the position of the next sample to use in the sample_bank
-			// if sample_ration <1 the sample_value will be pushed into the bank several times (time expansion)
-
+            
+			 
 			if (play_sample)
 			 { accumulator += playpack_rate; // shift sampleposition
 			   read_head = (accumulator >> 16); //rightshift 16 == div by 65535 
 			 }
-			 
+
+			 /*
+			 if (play_sample)
+			  { accumulator++;
+			    read_head = accumulator * Rdivider;
+			  }
+		*/
+
 			//glitch_len equals array_size
 			if (read_head >= write_head) {
 				read_head = 0;
@@ -318,26 +324,21 @@ void AudioEffectGranular::update(void)
 		//FREQUENCY DIVIDER
 		// todo: change into continous averaged sampling by adding a new block->data and removing the oldest from the samples
 		//       array. Average calculation can be done as new_average = last_average - oldest_data*0.1 + latest_data*0.1
-        uint8_t dividerset=20;
-		float dividermult =1/dividerset;
-	    float averaged_sample=0;
-		//first calculate the current averaged_sample in the sample_bank
-		/*for (int k = 0; k < dividerset; k++) 
-            { averaged_sample+=sample_bank[k];
-			 }
-        */
-		uint16_t old_sample;
+        uint8_t dividerset=10;
 		
+		//needs very little memory, only X=dividerset samples[X] 
 		for (int k = 0; k < AUDIO_BLOCK_SAMPLES; k++) 
-		 {   
-			// old_sample=sample_bank[k%dividerset]; // take previous readout at this position
-			 sample_bank[k%dividerset]= block->data[k];  //store current readout 
-	        // averaged_sample=averaged_sample+block->data[k]-old_sample;
-			 block->data[k] = sample_bank[0]; //gets updated every X samples
-						
+		 {   sample_bank[divider_sample%dividerset]= block->data[k];  //store current readout in revolving arrayposition
+	         block->data[k] = sample_bank[0]; //output is always based on the same arrayposition
+			 divider_sample++;
 		}
-	  } 
-
+         //roll over the sample_counter at a safe point (block_size*divider) so all blocks are based on equal datasets
+		if (divider_sample>=AUDIO_BLOCK_SAMPLES*dividerset)
+		 {  divider_sample=0;
+		 }
+		  
+	  }
+	  
 	transmit(block);
 	release(block);
 }
