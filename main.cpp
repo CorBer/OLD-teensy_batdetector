@@ -146,7 +146,7 @@
 
 // *************************** LIBRARIES **************************
 
-#include <TimeLib.h>
+//#include <TimeLib.h>
 #include "Audio.h"
 #include <SPI.h>
 #include <Bounce.h>
@@ -336,6 +336,14 @@ uint32_t nj = 0;
 int16_t granularMemory[GRANULAR_MEMORY_SIZE];
 // ******************** SPECTRUM MODES ********************
 
+uint8_t spectrum_mode=0;  //0=full, 1=selection1 2=xxx 
+
+//set spectrum at 281khz
+//full 2Khz-130khz (bin 2-120) pixelwidth 2 (240/120)
+//25-105 khz              pixelwidth 3 (240/80)
+//25-85 khz               pixelwidth 4 (240/60)
+//25-73 khz               pixelwidth 5 (240/48)
+
 #define waterfallgraph 1
 #define spectrumgraph 2
 
@@ -442,14 +450,16 @@ float freq_Oscillator =50000;
 #define  MENU_FRQ   2 //frequency
 #define  MENU_BUTTONL   3 //set function for buttonL
 #define  MENU_DNS   4 //denoise
-#define  MENU_SR    5 //sample rate
-#define  MENU_REC   6 //record
-#define  MENU_PLY   7 //play
-#define  MENU_PLD   8 //play at original rate
-#define  MENU_MAX 8
+#define  MENU_SPECTRUMMODE 5
+#define  MENU_SR    6 //sample rate
+#define  MENU_REC   7 //record
+#define  MENU_PLY   8 //play
+#define  MENU_PLD   9 //play at original rate
+
+#define  MENU_MAX 9
 
 const int Leftchoices=MENU_MAX+1; //can have any value
-const int Rightchoices=MENU_FRQ+1;
+const int Rightchoices=MENU_FRQ+1; //allow up to FRQ
 const char* MenuEntry [Leftchoices] =
   {
     "Volume",
@@ -457,10 +467,12 @@ const char* MenuEntry [Leftchoices] =
     "Frequency",
     "ButtonL",
     "Denoise",
+    "Spectrum",
     "SampleR",
     "Record",
     "Play",
-    "PlayR"
+    "PlayR",
+    
 
   };
 
@@ -489,9 +501,9 @@ const char* MenuEntry [Leftchoices] =
 
 //available modes
 #define detector_heterodyne 0
-#define detector_divider 1
-#define detector_Auto_heterodyne 2
-#define detector_Auto_TE 3 // time expansion
+#define detector_Auto_heterodyne 1
+#define detector_Auto_TE 2 // time expansion
+#define detector_divider 3
 #define detector_passive 4 // no processing at all
 
 //default
@@ -528,7 +540,7 @@ char filename[80];
 
 // ******************************************** DISPLAY
 
-int calc_menu_dxoffset(const char* str)
+int calc_menu_dxoffset(const char* str)  // to position the menu on the right screenedge
 {
 #ifdef USETFT
   String s=String(str); 
@@ -594,9 +606,13 @@ void display_settings() {
         { tft.setTextColor(ENC_MENU_COLOR);
          }
         else
-        { tft.setTextColor(ENC_VALUE_COLOR);}
-
+        { tft.setTextColor(ENC_VALUE_COLOR);
+         }
+      
        tft.print(MenuEntry[EncLeft_menu_idx]);
+       if (EncLeft_menu_idx==MENU_SPECTRUMMODE)
+         tft.print(spectrum_mode);
+       
        tft.print(" ");
 
        if (EncRight_function==enc_value) 
@@ -899,8 +915,28 @@ void waterfall(void) // thanks to Frank B !
   int batCall_LoF_bin= int(25000/(sample_rate_real / FFT_points));
   int batCall_HiF_bin= int(80000/(sample_rate_real / FFT_points));
 
+  uint8_t spec_hi=120; //default 120
+  uint8_t spec_lo=2; //default 2
+  uint8_t spec_width=2;
+
+  //if (sample_rate_real==SAMPLE_RATE_281K) 
+  if (spectrum_mode>0) 
+      { if (spectrum_mode==1)
+          {spec_lo=int(25000/(sample_rate_real / FFT_points));
+          spec_hi=int(90000/(sample_rate_real / FFT_points));
+          spec_width=4;
+          }
+        if (spectrum_mode==2)
+          {spec_lo=int(25000/(sample_rate_real / FFT_points));
+           spec_hi=int(70000/(sample_rate_real / FFT_points));
+           spec_width=6;
+          }
+          
+      }
+      
   uint16_t FFT_pixels[240]; // maximum of 240 pixels, each one is the result of one FFT
-  FFT_pixels[0]=0; FFT_pixels[1]=0;  FFT_pixels[2]=0; FFT_pixels[3]=0;
+  memset(FFT_pixels,0,sizeof(FFT_pixels));
+  //FFT_pixels[0]=0; FFT_pixels[1]=0;  FFT_pixels[2]=0; FFT_pixels[3]=0;
 
     FFTcount++;
 
@@ -925,7 +961,8 @@ void waterfall(void) // thanks to Frank B !
     int avgFFTbin=0;
     // there are 128 FFT different bins only 120 are shown on the graphs
 
-    for (int i = 2; i < 120; i++) {
+    
+    for (int i = spec_lo; i < spec_hi; i++) {
       int val = myFFT.output[i]*10 -FFTavg[i]*0.9 + 10; //v1
       avgFFTbin+=val;
       //detect the peakfrequency
@@ -935,18 +972,19 @@ void waterfall(void) // thanks to Frank B !
         }
        if (val<5)
            {val=5;}
-
-       FFT_pixels[i*2] = tft.color565(
+       uint8_t pixpos=(i-spec_lo)*spec_width;
+       FFT_pixels[pixpos] = tft.color565(
               min(255, val/2),
               (val/6>255)? 255 : val/6,
               //(val/4>255)? 255 : val/4
                             0
               //((255-val)>>1) <0? 0: (255-val)>>1
              );
-
-      FFT_pixels[i*2+1]=FFT_pixels[i*2];
+      for (int j=1; j<spec_width; j++)
+         { FFT_pixels[pixpos+j]=FFT_pixels[pixpos];
+         }
     }
-    avgFFTbin=avgFFTbin/120;
+    avgFFTbin=avgFFTbin/(spec_hi-spec_lo);
     //mark the peak
     //FFT_pixels[FFT_peakF_bin*2]=COLOR_RED;
     //FFT_pixels[FFT_peakF_bin*2+1]=COLOR_RED;
@@ -956,30 +994,31 @@ void waterfall(void) // thanks to Frank B !
 
   int powerSpectrum_Maxbin=0;
   // detected a peak in the bat frequencies
-  if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin))
-  {
-    //collect data for the powerspectrum
-    for (int i = 2; i < 120; i++)
-     {
-        //add new samples
-        FFTpowerspectrum[i]+=myFFT.output[i];
-        //keep track of the maximum
-        if (FFTpowerspectrum[i]>powerspectrum_Max)
-           { powerspectrum_Max=FFTpowerspectrum[i];
-             powerSpectrum_Maxbin=i;
-           }
+    if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin))
+    {
+        //collect data for the powerspectrum
+      for (int i = spec_lo; i < spec_hi; i++)
+      {
+          //add new samples
+          FFTpowerspectrum[i]+=myFFT.output[i];
+          //keep track of the maximum
+          if (FFTpowerspectrum[i]>powerspectrum_Max)
+            { powerspectrum_Max=FFTpowerspectrum[i];
+              powerSpectrum_Maxbin=i;
+            }
 
-     }
-     //keep track of the no of samples with bat-activity
-     powerspectrumCounter++;
-  }
-    // update display after every 100th FFT sample with bat-activity
+      }
+      //keep track of the no of samples with bat-activity
+      powerspectrumCounter++;
+    }
+
+    // update display after every 50th FFT sample with bat-activity
     if ((powerspectrumCounter>50)  )
        { powerspectrumCounter=0;
          //clear powerspectrumbox
          tft.fillRect(0,TOP_OFFSET-POWERGRAPH-SPECTRUMSCALE,ILI9341_TFTWIDTH,POWERGRAPH, COLOR_BLACK);
          // keep a minimum maximumvalue to the powerspectrum
-         int binLo=2; int binHi=0;
+         int binLo=spec_lo; int binHi=0;
          //find the nearest frequencies below 10% of the maximum
          if (powerSpectrum_Maxbin!=0)
            {
@@ -988,9 +1027,9 @@ void waterfall(void) // thanks to Frank B !
               while(searchedge) {
                    if ((FFTpowerspectrum[i]/(powerspectrum_Max+1))>0.1)
                      { i--;
-                       if (i==2)
+                       if (i==spec_lo)
                         {searchedge=false;
-                         binLo=2; }
+                         binLo=spec_lo; }
                      }
                     else
                      { searchedge=false;
@@ -1003,7 +1042,7 @@ void waterfall(void) // thanks to Frank B !
               while(searchedge) {
                    if ((FFTpowerspectrum[i]/(powerspectrum_Max+1))>0.1)
                      { i++;
-                       if (i==120)
+                       if (i==spec_hi)
                         {searchedge=false;
                          binHi=0; }
                      }
@@ -1014,23 +1053,22 @@ void waterfall(void) // thanks to Frank B !
                   }
            }
           //draw spectrumgraph
-         for (int i=2; i<120; i++)
+          for (int i=spec_lo; i<spec_hi; i++)
           {
             int ypos=FFTpowerspectrum[i]/powerspectrum_Max*POWERGRAPH;
-            tft.drawFastVLine(i*2,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_RED);
+            tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_RED);
             if (i==powerSpectrum_Maxbin)
-              { tft.drawFastVLine(i*2,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,ENC_MENU_COLOR);
+              { tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_YELLOW);
                }
             //reset powerspectrum for next samples
             FFTpowerspectrum[i]=0;
           }
 
-
          float bin2frequency=(sample_rate_real / FFT_points)*0.001;
          powerspectrum_Max=powerspectrum_Max*0.5; //lower the max after a graphupdate
 
          //if (TE_ready) //dont update when playing TE
-          {tft.setCursor(140,TOP_OFFSET-POWERGRAPH);
+          {tft.setCursor(130,TOP_OFFSET-POWERGRAPH);
           tft.setTextColor(ENC_VALUE_COLOR);
           tft.print(int(binLo*bin2frequency) );
           tft.print(" ");
@@ -1039,6 +1077,9 @@ void waterfall(void) // thanks to Frank B !
           tft.print(" ");
           tft.setTextColor(ENC_VALUE_COLOR);
           tft.print(int(binHi* bin2frequency) );
+          tft.print('*');
+          tft.print(spectrum_mode);
+
          }
 
        }
@@ -1549,6 +1590,14 @@ void updateEncoder(uint8_t Encoderside )
         { // setting FFTcount to 0 re-activates a 1000 sample denoise
           FFTcount=0;
         }
+
+      if (menu_idx==MENU_SPECTRUMMODE)
+        { 
+           spectrum_mode+=change;
+           spectrum_mode=spectrum_mode%3; // 0..2 0=full (2pix), 1=25-90 (4pix), 2=25-70 (6pix)
+                   
+        }
+
 
       /******************************LBUTTON SET MODE  ***************/
       if (menu_idx==MENU_BUTTONL)
