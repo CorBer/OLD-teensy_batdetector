@@ -610,8 +610,8 @@ void display_settings() {
          }
       
        tft.print(MenuEntry[EncLeft_menu_idx]);
-       if (EncLeft_menu_idx==MENU_SPECTRUMMODE)
-         tft.print(spectrum_mode);
+      //  if (EncLeft_menu_idx==MENU_SPECTRUMMODE)
+      //    tft.print(spectrum_mode);
        
        tft.print(" ");
 
@@ -702,15 +702,22 @@ void display_settings() {
     tft.print(s);
         
     //scale every 10kHz
-    float x_factor=10000/(0.5*(sample_rate_real / FFT_points));
-    int curF=2*int(freq_real/(sample_rate_real / FFT_points));
+    if (displaychoice>0)
+      { float x_factor=10000/(0.5*(sample_rate_real / FFT_points));
+        int curF=2*int(freq_real/(sample_rate_real / FFT_points));
+        int maxScale=int(sample_rate_real/20000);
+        for (int i=1; i<maxScale; i++)
+        { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
+        }
+        tft.fillCircle(curF,TOP_OFFSET-4,3,ENC_MENU_COLOR);
+      }
+      else 
+        { tft.setCursor(0,TOP_OFFSET-SPECTRUMSCALE);
+         
 
-    int maxScale=int(sample_rate_real/20000);
-    for (int i=1; i<maxScale; i++)
-     { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
-     }
-    tft.fillCircle(curF,TOP_OFFSET-4,3,ENC_MENU_COLOR);
 
+          tft.print("DISPLAY DISABLED");
+        }
    #endif
 }
 
@@ -814,99 +821,52 @@ void  set_sample_rate (int sr) {
 
 void spectrum() { // spectrum analyser code by rheslip - modified
      #ifdef USETFT
-     if (myFFT.available()) {
-//     if (fft1024_1.available()) {
-    int16_t peak=0; uint16_t avgF=0;
-
-
-//    for (int i = 0; i < 240; i++) {
-    //startup sequence to denoise the FFT
-    FFTcount++;
-    if (FFTcount==1)
-     {for (int16_t i = 0; i < 128; i++) {
-         FFTavg[i]=0;
-     }
-     }
-
-    if (FFTcount<1000)
      {
-       for (int i = 0; i < 128; i++) {
-         FFTavg[i]=FFTavg[i]+abs(myFFT.output[i])*0.001; //0.1% of total values
-         }
-     }
-
-for (int16_t x = 2; x < 128; x++) {
-   avgF=avgF+FFT_bin[x];
-   if (FFT_bin[x]>peak)
-      {
-        peak=FFT_bin[x];
-      }
-}
-
-/*
-avgF=avgF/128;
-//check if the peak is at least 2x higher than the average otherwise set the indicator low
-if ((peak-avgF)<(avgF/3))
-  { maxF=2;}
-  */
+//   
+  uint16_t OFFSET =ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET;
+ //tft.fillRect(0,TOP_OFFSET,ILI9341_TFTWIDTH,OFFSET, COLOR_BLACK);
+  int16_t FFT_sbin [128];
   for (int16_t x = 2; x < 128; x++) {
-//  for (uint16_t x = 8; x < 512; x+=4) {
-     FFT_bin[x] = (myFFT.output[x]);//-FFTavg[x]*0.9;
-
-//     FFT_bin[x/4] = abs(fft1024_1.output[x]);
-     int barnew = (FFT_bin[x])/2 ;
-
+     FFT_sbin[x] = (myFFT.output[x]);//-FFTavg[x]*0.9;
+     int barnew = (FFT_sbin[x])*0.5 ;
      // this is a very simple first order IIR filter to smooth the reaction of the bars
      int bar = 0.05 * barnew + 0.95 * barm[x];
-     if (bar >(ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET))
-        { bar=(ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET);
+     if (bar > OFFSET) //clip
+        { bar= OFFSET;
         }
-     if (bar <0) bar=0;
-     if (barnew >(ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET))
-        { barnew=(ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET);
+     if (bar <0) 
+        {bar=0;
+        }
+     if (barnew >OFFSET) //clip
+        { barnew=OFFSET;
         }
      int g_x=x*2;
      int spectrumline=barm[x];
      int spectrumline_new=barnew;
 
-     //tft.drawFastVLine(g_x,TOP_OFFSET,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET, COLOR_BLACK);
      tft.drawFastVLine(g_x,TOP_OFFSET,spectrumline_new, COLOR_GREEN);
-     //tft.drawFastVLine(g_x,TOP_OFFSET,spectrumline, COLOR_RED);
-     tft.drawFastVLine(g_x,TOP_OFFSET+spectrumline_new,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET-spectrumline_new, COLOR_BLACK);
+     tft.drawFastVLine(g_x,TOP_OFFSET+spectrumline_new,OFFSET-spectrumline_new, COLOR_BLACK);
      tft.drawFastVLine(g_x+1,TOP_OFFSET,spectrumline, COLOR_DARKGREEN);
      tft.drawFastVLine(g_x+1,TOP_OFFSET+spectrumline,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET-spectrumline, COLOR_BLACK);
-    /* if (x==maxF)
-       { colF=COLOR_ORANGE;
-         tft.drawFastVLine(g_x,TOP_OFFSET,240-bar, colF);
-         }
-      */
-
-     //tft.drawPixel(g_x,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-bar,colF);
-
      barm[x] = bar;
   }
 
     // if (mode == MODE_DETECT)  search_bats();
   } //end if
-  if (RightButton_Mode==MODE_PLAY)
-    {//float ww=( player.positionMillis()/player.lengthMillis()*240.0);
-     tft.drawFastHLine(0,320-BOTTOM_OFFSET-5,240*player.positionMillis()/player.lengthMillis()-10,COLOR_BLACK);
-     tft.drawFastHLine(240*player.positionMillis()/player.lengthMillis()-9,320-BOTTOM_OFFSET-5,5,ENC_MENU_COLOR);
-     tft.drawFastHLine(0,320-BOTTOM_OFFSET-4,240*player.positionMillis()/player.lengthMillis()-10,COLOR_BLACK);
-     tft.drawFastHLine(240*player.positionMillis()/player.lengthMillis()-9,320-BOTTOM_OFFSET-4,5,ENC_MENU_COLOR);
-    }
+  
   #endif
 }
 
-// **************** WATERFALL SPECTRUM GRAPH
-void waterfall(void) // thanks to Frank B !
+
+// **************** General graph *************************************************************************************
+void updatedisplay(void) 
 {
 
-#ifdef USETFT
+#ifdef USETFT 
 
 // code for 256 point FFT
-
  if (myFFT.available()) {
+
   const uint16_t Y_OFFSET = TOP_OFFSET;
   static int count = TOP_OFFSET;
   //int curF=int(freq_real/(sample_rate_real / FFT_points));
@@ -919,21 +879,6 @@ void waterfall(void) // thanks to Frank B !
   uint8_t spec_lo=2; //default 2
   uint8_t spec_width=2;
 
-  //if (sample_rate_real==SAMPLE_RATE_281K) 
-  if (spectrum_mode>0) 
-      { if (spectrum_mode==1)
-          {spec_lo=int(25000/(sample_rate_real / FFT_points));
-          spec_hi=int(90000/(sample_rate_real / FFT_points));
-          spec_width=4;
-          }
-        if (spectrum_mode==2)
-          {spec_lo=int(25000/(sample_rate_real / FFT_points));
-           spec_hi=int(70000/(sample_rate_real / FFT_points));
-           spec_width=6;
-          }
-          
-      }
-      
   uint16_t FFT_pixels[240]; // maximum of 240 pixels, each one is the result of one FFT
   memset(FFT_pixels,0,sizeof(FFT_pixels));
   //FFT_pixels[0]=0; FFT_pixels[1]=0;  FFT_pixels[2]=0; FFT_pixels[3]=0;
@@ -947,7 +892,7 @@ void waterfall(void) // thanks to Frank B !
        }
      }
 
-    // collect 1000 FFT samples for the denoise array
+    // collect 100 FFT samples for the denoise array
     if (FFTcount<100)
      { for (int i = 2; i < 128; i++) {
          //FFTavg[i]=FFTavg[i]+myFFT.read(i)*65536.0*5*0.001; //0.1% of total values
@@ -955,13 +900,11 @@ void waterfall(void) // thanks to Frank B !
          }
      }
 
-
     int FFT_peakF_bin=0;
     int peak=512;
     int avgFFTbin=0;
     // there are 128 FFT different bins only 120 are shown on the graphs
-
-    
+   
     for (int i = spec_lo; i < spec_hi; i++) {
       int val = myFFT.output[i]*10 -FFTavg[i]*0.9 + 10; //v1
       avgFFTbin+=val;
@@ -972,6 +915,7 @@ void waterfall(void) // thanks to Frank B !
         }
        if (val<5)
            {val=5;}
+
        uint8_t pixpos=(i-spec_lo)*spec_width;
        FFT_pixels[pixpos] = tft.color565(
               min(255, val/2),
@@ -984,11 +928,9 @@ void waterfall(void) // thanks to Frank B !
          { FFT_pixels[pixpos+j]=FFT_pixels[pixpos];
          }
     }
+
     avgFFTbin=avgFFTbin/(spec_hi-spec_lo);
-    //mark the peak
-    //FFT_pixels[FFT_peakF_bin*2]=COLOR_RED;
-    //FFT_pixels[FFT_peakF_bin*2+1]=COLOR_RED;
-   if ((peak/avgFFTbin)<1.1) //very low peakvalue so probably noise
+    if ((peak/avgFFTbin)<1.1) //very low peakvalue so probably noise
      { FFT_peakF_bin=0;
      }
 
@@ -998,25 +940,40 @@ void waterfall(void) // thanks to Frank B !
     {
         //collect data for the powerspectrum
       for (int i = spec_lo; i < spec_hi; i++)
-      {
-          //add new samples
+      {    //add new samples
           FFTpowerspectrum[i]+=myFFT.output[i];
           //keep track of the maximum
           if (FFTpowerspectrum[i]>powerspectrum_Max)
             { powerspectrum_Max=FFTpowerspectrum[i];
               powerSpectrum_Maxbin=i;
             }
-
       }
       //keep track of the no of samples with bat-activity
       powerspectrumCounter++;
     }
+ 
+    if (displaychoice==spectrumgraph)
+         if (detector_mode==detector_Auto_TE)
+            {  if(powerspectrumCounter%5==0) 
+                    { spectrum();
+                    }
+            }
+          else
+          {
+            if(FFTcount%2==0) 
+                spectrum();
 
-    // update display after every 50th FFT sample with bat-activity
-    if ((powerspectrumCounter>50)  )
+          }
+            
+
+    // update spectrumdisplay after every 50th FFT sample with bat-activity
+    if (displaychoice==waterfallgraph)
+      if ((powerspectrumCounter>50)  )
        { powerspectrumCounter=0;
+                  
          //clear powerspectrumbox
          tft.fillRect(0,TOP_OFFSET-POWERGRAPH-SPECTRUMSCALE,ILI9341_TFTWIDTH,POWERGRAPH, COLOR_BLACK);
+           
          // keep a minimum maximumvalue to the powerspectrum
          int binLo=spec_lo; int binHi=0;
          //find the nearest frequencies below 10% of the maximum
@@ -1054,21 +1011,19 @@ void waterfall(void) // thanks to Frank B !
            }
           //draw spectrumgraph
           for (int i=spec_lo; i<spec_hi; i++)
-          {
-            int ypos=FFTpowerspectrum[i]/powerspectrum_Max*POWERGRAPH;
-            tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_RED);
-            if (i==powerSpectrum_Maxbin)
-              { tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_YELLOW);
-               }
-            //reset powerspectrum for next samples
-            FFTpowerspectrum[i]=0;
-          }
+            { int ypos=FFTpowerspectrum[i]/powerspectrum_Max*POWERGRAPH;
+              tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_RED);
+              if (i==powerSpectrum_Maxbin)
+                { tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_YELLOW);
+                }
+              //reset powerspectrum for next samples
+              FFTpowerspectrum[i]=0;
+            }
+          
+          float bin2frequency=(sample_rate_real / FFT_points)*0.001;
+          powerspectrum_Max=powerspectrum_Max*0.5; //lower the max after a graphupdate
 
-         float bin2frequency=(sample_rate_real / FFT_points)*0.001;
-         powerspectrum_Max=powerspectrum_Max*0.5; //lower the max after a graphupdate
-
-         //if (TE_ready) //dont update when playing TE
-          {tft.setCursor(130,TOP_OFFSET-POWERGRAPH);
+          tft.setCursor(130,TOP_OFFSET-POWERGRAPH);
           tft.setTextColor(ENC_VALUE_COLOR);
           tft.print(int(binLo*bin2frequency) );
           tft.print(" ");
@@ -1079,9 +1034,7 @@ void waterfall(void) // thanks to Frank B !
           tft.print(int(binHi* bin2frequency) );
           tft.print('*');
           tft.print(spectrum_mode);
-
-         }
-
+        
        }
 
 
@@ -1137,8 +1090,9 @@ void waterfall(void) // thanks to Frank B !
         granular1.stopTimeExpansion();
       }
 
-
-    if (end_detection<50) //keep scrolling 50ms after the last bat-call
+   if (displaychoice==waterfallgraph)
+   {
+     if (end_detection<50) //keep scrolling 50ms after the last bat-call
       { //if (TE_ready) //not playing TE
         { tft.writeRect( 0,count, ILI9341_TFTWIDTH,1, (uint16_t*) &FFT_pixels); //show a line with spectrumdata
           tft.setScroll(count);
@@ -1147,14 +1101,18 @@ void waterfall(void) // thanks to Frank B !
 
       }
 
-    if (count >= ILI9341_TFTHEIGHT-BOTTOM_OFFSET) count = Y_OFFSET;
+     if (count >= ILI9341_TFTHEIGHT-BOTTOM_OFFSET) count = Y_OFFSET;
+   }
 
-
+   
   }
 #endif
 
 }
-// **************** END WATERFALL SPECTRUM GRAPH ***************************
+
+
+
+
 
 // ******************************************  RECORDING
 
@@ -1988,13 +1946,14 @@ void loop()
   if (LeftButton_Mode!=MODE_REC)
   { updateEncoders();
     #ifdef USETFT
-    if (displaychoice==waterfallgraph)
-      { waterfall();
-       }
-    else
-      if (displaychoice==spectrumgraph)
-        {  spectrum();
-        }
+    updatedisplay();
+    // if (displaychoice==waterfallgraph)
+    //   { waterfall();
+    //    }
+    // else
+    //   if (displaychoice==spectrumgraph)
+    //     {  spectrum();
+    //     }
     #endif
    }
 }
