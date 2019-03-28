@@ -1998,6 +1998,16 @@ void loop()
   }
 
   
+  struct tm tx = seconds2tm(RTC_TSR);
+  if (tx.tm_min!=old_time_min)
+  { tft.setFont(Arial_16);
+    tft.setCursor(180,20);
+    tft.fillRect(180,20,60,20,MENU_BCK_COLOR);
+    char tstr[9];
+    snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
+    tft.print(tstr);
+    old_time_min=tx.tm_min;
+  }
 
   updateButtons();
 
