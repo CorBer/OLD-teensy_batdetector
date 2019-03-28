@@ -174,6 +174,8 @@ int helpday;
 int helpmonth;
 int helpyear;
 int helpsec;
+uint8_t old_time_min=0;
+
 uint8_t hour10_old;
 uint8_t hour1_old;
 uint8_t minute10_old;
@@ -600,6 +602,13 @@ void display_settings() {
         tft.print("error");
 
      }
+
+     struct tm tx = seconds2tm(RTC_TSR);
+     tft.setCursor(180,20);
+     char tstr[9];
+     snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
+     tft.print(tstr);
+     
      // push the cursor to the lower part of the screen 
      tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET); //position of encoder functions
 
@@ -1987,6 +1996,8 @@ void loop()
   if (LeftButton_Mode == MODE_PLAY) {
     continuePlaying();
   }
+
+  
 
   updateButtons();
 
