@@ -1,12 +1,16 @@
+//PROCEDURE FOR LINUX DIRECT UPLOAD when using PLATFORMIO
+//CALL TEENSY_LOADER and SELECT HEX (located in subdir .pioenvs/teensy36)
+//CALL TEENSY_REBOOT ... this will then directly upload the HEX
+// ...change the source ... and recompile
+//CALL TEENSY_REBOOT ... this will directly upload the changed HEX
+
 
 /***********************************************************************
- *  TEENSY 3.6 BAT DETECTOR V0.6 20190317
+ *  TEENSY 3.6 BAT DETECTOR V0.8 20190324
  *
  *  Copyright (c) 2019, Cor Berrevoets, registax@gmail.com
  *
  *  TODO: use selectable presets
- *
- *  TFT interferes with Auto_TE, scroll and several other screen-updates create noise
  *
  *
  *  HARDWARE USED:
@@ -146,7 +150,8 @@
 
 // *************************** LIBRARIES **************************
 
-//#include <TimeLib.h>
+#include <TimeLib.h>
+
 #include "Audio.h"
 #include <SPI.h>
 #include <Bounce.h>
@@ -451,12 +456,13 @@ float freq_Oscillator =50000;
 #define  MENU_BUTTONL   3 //set function for buttonL
 #define  MENU_DNS   4 //denoise
 #define  MENU_SPECTRUMMODE 5
-#define  MENU_SR    6 //sample rate
-#define  MENU_REC   7 //record
-#define  MENU_PLY   8 //play
-#define  MENU_PLD   9 //play at original rate
+#define  MENU_TIME  6
+#define  MENU_SR    7 //sample rate
+#define  MENU_REC   8 //record
+#define  MENU_PLY   9 //play
+#define  MENU_PLD   10 //play at original rate
 
-#define  MENU_MAX 9
+#define  MENU_MAX 10
 
 const int Leftchoices=MENU_MAX+1; //can have any value
 const int Rightchoices=MENU_FRQ+1; //allow up to FRQ
@@ -468,6 +474,7 @@ const char* MenuEntry [Leftchoices] =
     "ButtonL",
     "Denoise",
     "Spectrum",
+    "SetTime",
     "SampleR",
     "Record",
     "Play",
@@ -575,13 +582,13 @@ void display_settings() {
 
     switch (detector_mode) {
        case detector_heterodyne:
-         tft.print("HTD"); //
+         tft.print("HT"); //
        break;
        case detector_divider:
          tft.print("FD");
        break;
        case detector_Auto_heterodyne:
-         tft.print("Auto_HTD");
+         tft.print("Auto_HT");
        break;
        case detector_Auto_TE:
         tft.print("Auto_TE");
@@ -1565,7 +1572,48 @@ void updateEncoder(uint8_t Encoderside )
         LeftButton_Next=currentmode%MODE_MAX; //truncate
         
       }
+      /******************************TIME  ***************/
+      if (EncLeft_menu_idx==MENU_TIME)
+      {  struct tm tx = seconds2tm(RTC_TSR);
+         
+         if (Encoderside==enc_leftside)
+            {
+              int delta=change*1; //seconds
+               uint32_t currentmillis=millis();
+           if ((currentmillis-lastmillis)<500)
+              { delta=change*5;} //5 seconds
+           if ((currentmillis-lastmillis)<250)
+              { delta=change*10;} //10 seconds
+           if ((currentmillis-lastmillis)<100)
+              { delta=change*60;} //1 minutes 
 
+              time_t time_tst = now()+delta;
+              
+              tmElements_t tmtm;
+              breakTime(time_tst, tmtm);
+              Teensy3Clock.set(makeTime(tmtm));
+              setTime(makeTime(tmtm));
+
+              tft.setCursor(80,50);
+              tft.fillRect(80,50,ILI9341_TFTWIDTH-80,20, COLOR_BLACK);
+    
+              tft.setFont(Arial_24);
+              char tstr[9];
+              struct tm tx = seconds2tm(RTC_TSR);
+              snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
+              tft.print(tstr);
+              lastmillis=millis();
+            }
+        //  if (Encoderside==enc_rightside)
+        //     {
+        //       int minu=tx.tm_min;
+        //       minu=minu+change;
+        //       minu=constrain(minu,0,59);
+
+        //     }
+
+
+      }  
       /******************************DISPLAY  ***************/
 
       // if (menu_idx==MENU_DSP)
@@ -1819,7 +1867,7 @@ void setup() {
   // Audio connections require memory.
   AudioMemory(300);
 
-  //setSyncProvider(getTeensy3Time);
+  setSyncProvider(getTeensy3Time);
 
 // Enable the audio shield. select input. and enable output
   sgtl5000.enable();
