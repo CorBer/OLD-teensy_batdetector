@@ -110,7 +110,7 @@
 */
 
 // ***************************** GLOBAL DEFINES
-//#define DEBUGSERIAL
+#define DEBUGSERIAL
 
 //USE a TFT (code will not function properly without !!! )
 #define USETFT
@@ -1462,6 +1462,9 @@ void updateEncoder(uint8_t Encoderside )
       change=EncLeftchange;
       menu_idx=EncLeft_menu_idx;
       choices=Leftchoices; //available menu options
+      #ifdef DEBUGSERIAL
+              Serial.println("EncoderLeft");
+      #endif
     }
 
    if (Encoderside==enc_rightside)
@@ -2025,7 +2028,7 @@ void loop()
   updateButtons();
 
   // during recording screens are not updated to reduce interference !
-  if (LeftButton_Mode!=MODE_REC)
+  if (not recorderActive)
   { updateEncoders();
     #ifdef USETFT
     updatedisplay();
