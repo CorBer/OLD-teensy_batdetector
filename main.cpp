@@ -4,9 +4,9 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-
+#define batversion "v0.82 20190410"
 /***********************************************************************
- *  TEENSY 3.6 BAT DETECTOR V0.81 20190409
+ *  TEENSY 3.6 BAT DETECTOR V0.82 20190410
  *
  *  Copyright (c) 2019, Cor Berrevoets, registax@gmail.com
  *
@@ -145,7 +145,7 @@
     int filecounter=0;
     int fileselect=0;
     int referencefile=0;
-    int file_number = 0;
+    
 #endif
 
 // *************************** LIBRARIES **************************
@@ -158,6 +158,7 @@
 
 // *************************** VARS  **************************
 
+String versionStr=batversion;
 boolean SD_ACTIVE=false;
 boolean continousPlay=false;
 boolean recorderActive=false;
@@ -345,13 +346,6 @@ uint32_t nj = 0;
 int16_t granularMemory[GRANULAR_MEMORY_SIZE];
 // ******************** SPECTRUM MODES ********************
 
-uint8_t spectrum_mode=0;  //0=full, 1=selection1 2=xxx 
-
-//set spectrum at 281khz
-//full 2Khz-130khz (bin 2-120) pixelwidth 2 (240/120)
-//25-105 khz              pixelwidth 3 (240/80)
-//25-85 khz               pixelwidth 4 (240/60)
-//25-73 khz               pixelwidth 5 (240/48)
 
 #define waterfallgraph 1
 #define spectrumgraph 2
@@ -424,6 +418,7 @@ const SR_Descriptor SR [SAMPLE_RATE_MAX + 1] =
 };
 
 // initial sampling setup
+int play_rate = SAMPLE_RATE_22K;
 int sample_rate = SAMPLE_RATE_281K;
 int sample_rate_real = SR[sample_rate].freq_real;
 int last_sample_rate=sample_rate;
@@ -487,28 +482,6 @@ const char* MenuEntry [Leftchoices] =
 
   };
 
-// typedef struct Menu_Descriptor
-// {
-//     const char* name;
-//     // ********preset variables below NOT USED YET
-//     const int len; // length of string to allow right-alignment
-//     const int def; //default settings
-//     const int low; // low threshold
-//     const int high; //high threshold
-
-// } Menu_Desc;
-
-// const Menu_Descriptor MenuEntry1 [Leftchoices] =
-// {  {"Volume",6,60,0,100}, //divide by 100
-//    {"Gain",4,30,0,63},
-//    {"Frequency",9,45,20,90}, //multiply 1000
-//    {"Display",7,0,0,0},
-//    {"Denoise",7,0,0,0},
-//    {"SampleR",6,0,0,0},
-//    {"Record",6,0,0,0}, //functions where the LeftEncoder
-//    {"Play",4,0,0,0},
-//    {"PlayD",5,0,0,0},
-// } ;
 
 //available modes
 #define detector_heterodyne 0
@@ -521,6 +494,31 @@ const char* MenuEntry [Leftchoices] =
 int detector_mode=detector_heterodyne;
 
 // *********************************** CODE defs
+
+void countRAWfiles()
+{
+    filecounter=0;
+    root = SD.open("/");
+
+    while (true) {
+        File entry =  root.openNextFile();
+        if ((! entry) and (filecounter < MAX_FILES )) {
+          break;
+        }
+        if (entry.isDirectory()) {
+          // do nothing, only look for raw files in the root
+        }
+        else   {
+        String fname=entry.name();
+         if (fname.indexOf(".RAW"))
+          {strcpy(filelist[filecounter],entry.name() );
+           filecounter++;
+          }
+        }
+        entry.close();
+       }
+}
+
 
 
 #ifdef USESD1
@@ -571,13 +569,13 @@ void display_settings() {
 
     tft.setFont(Arial_16);
     tft.fillRect(0,0,240,TOP_OFFSET-50,MENU_BCK_COLOR);
-    tft.fillRect(0,TOP_OFFSET-10,240,10,COLOR_BLACK);
+    tft.fillRect(0,TOP_OFFSET-30,240,30,COLOR_BLACK);
     tft.fillRect(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET,240,BOTTOM_OFFSET_PART,MENU_BCK_COLOR);
     tft.fillRect(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART,240,BOTTOM_OFFSET,MENU_BCK_COLOR_PART);
 
     tft.setCursor(0,0);
     tft.print("g:"); tft.print(mic_gain);
-    tft.print(" f:"); tft.print(freq_real);
+    //tft.print(" f:"); tft.print(freq_real);
     tft.print(" v:"); tft.print(volume);
     tft.print(" SR"); tft.print(SRtext);
     //tft.print(" M"); tft.print(LeftButton_Mode); tft.print(LeftButton_Next);
@@ -601,7 +599,6 @@ void display_settings() {
        break;
        default:
         tft.print("error");
-
      }
 
      struct tm tx = seconds2tm(RTC_TSR);
@@ -610,11 +607,12 @@ void display_settings() {
      snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
      tft.print(tstr);
      
+     
+     /****************** SHOW ENCODER/BUTTON SETTING ***********************/
+     
      // push the cursor to the lower part of the screen 
      tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET); //position of encoder functions
-
-     /****************** SHOW ENCODER/BUTTON SETTING ***********************/
-
+       
      // set the colors according to the function of the encoders
      //if (RightButton_Mode==MODE_DETECT )
      // show menu selection as menu-active of value-active
@@ -626,11 +624,14 @@ void display_settings() {
         { tft.setTextColor(ENC_MENU_COLOR);
          }
       
-       tft.print(MenuEntry[EncLeft_menu_idx]);
-       tft.print(" ");
-       if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value))
-           {  tft.print(filelist[fileselect]);
+       if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) // when play selected only show filename
+           { tft.print(filelist[fileselect]);
            }
+       else 
+       {       tft.print(MenuEntry[EncLeft_menu_idx]);
+               tft.print(" ");
+       }
+       
        if (EncLeft_menu_idx==MENU_SR)
           { tft.print(SR[sample_rate].txt);
           }    
@@ -640,19 +641,16 @@ void display_settings() {
        else
          { tft.setTextColor(ENC_MENU_COLOR);} //menu is active
 
-       if (playActive==false)
-       { uint16_t dx=calc_menu_dxoffset((MenuEntry[EncRight_menu_idx]));
-         //uint16_t dx=tft.strPixelLen(MenuEntry[EncRight_menu_idx]);
-         tft.setCursor(ILI9341_TFTWIDTH-dx,ILI9341_TFTHEIGHT-BOTTOM_OFFSET);
-         tft.print(MenuEntry[EncRight_menu_idx]);
-       }
+       uint16_t dx=calc_menu_dxoffset((MenuEntry[EncRight_menu_idx]));
+       tft.setCursor(ILI9341_TFTWIDTH-dx,ILI9341_TFTHEIGHT-BOTTOM_OFFSET);
+       tft.print(MenuEntry[EncRight_menu_idx]);
+       
     }
     
     // push the cursor to the lower part of the screen 
     tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART); //position of button functions
-    
     tft.setTextColor(COLOR_YELLOW);
-
+   
     if ((EncLeft_menu_idx==MENU_BUTTONL ) and (EncLeft_function==enc_value)) //show the setting that is getting changed
        { tft.setTextColor(COLOR_WHITE);
         if (LeftButton_Next==MODE_DISPLAY)
@@ -691,16 +689,11 @@ void display_settings() {
     tft.setTextColor(COLOR_YELLOW);
 
     char* s="MODE";
-    // if (RightButton_Mode==MODE_DISPLAY)
-    //   s=("DISPLAY");
-    // if (RightButton_Mode==MODE_REC)
-    //   s=("RECORD");
-    // if (RightButton_Mode==MODE_PLAY)
-    //   s=("PLAY");
+    //currently v0.81 only DETECT 
     if (RightButton_Mode==MODE_DETECT) 
        s=("DETECT");
 
-    if (playActive==false) 
+    if (playActive==false) //dont show rightside menu choice when playing a file to allow the display of a filename
      {uint16_t sx=tft.strPixelLen(s);
       tft.setCursor(ILI9341_TFTWIDTH-sx-5,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART);
       tft.print(s);
@@ -714,7 +707,15 @@ void display_settings() {
         for (int i=1; i<maxScale; i++)
         { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
         }
-        tft.fillCircle(curF,TOP_OFFSET-4,3,ENC_MENU_COLOR);
+
+        //tft.fillCircle(curF,TOP_OFFSET-4,3,ENC_MENU_COLOR);
+        tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
+        //if (detector_mode==detector_Auto_heterodyne)
+          { char tstr[9];
+            snprintf(tstr,9, "%02d", int(freq_real/1000));
+            tft.setCursor(curF-10,TOP_OFFSET-30);  
+            tft.print(tstr);
+          }
       }
       else 
         { tft.setCursor(0,TOP_OFFSET-SPECTRUMSCALE);
@@ -728,11 +729,8 @@ void display_settings() {
 void       set_mic_gain(int8_t gain) {
 
     AudioNoInterrupts();
-    //sgtl5000.micGainNew (24);
     sgtl5000.micGain (gain);
-    //sgtl5000.lineInLevel(gain/4);
     AudioInterrupts();
-
     display_settings();
     powerspectrum_Max=0; // change the powerspectrum_Max for the FFTpowerspectrum
 } // end function set_mic_gain
@@ -753,10 +751,7 @@ void       set_freq_Oscillator(int freq) {
       freq_real = freq_Oscillator * (sample_rate_real / AUDIO_SAMPLE_RATE_EXACT) + 9;
     }
     AudioNoInterrupts();
-    //setup bin2frequency SINE
     sine1.frequency(freq_Oscillator);
-    //sine2.frequency(freq_Oscillator);
-
     AudioInterrupts();
     display_settings();
 } // END of function set_freq_Oscillator
@@ -788,7 +783,6 @@ void setI2SFreq(int freq) {
   const int numfreqs = 17;
   const int samplefreqs[numfreqs] = {  8000,      11025,      16000,      22050,       32000,       44100, (int)44117.64706 , 48000,      88200, (int)44117.64706 * 2,   96000, 176400, (int)44117.64706 * 4, 192000,  234000, 281000, 352800};
   const tmclk clkArr[numfreqs] = {{46, 4043}, {49, 3125}, {73, 3208}, {98, 3125}, {183, 4021}, {196, 3125}, {16, 255},   {128, 1875}, {107, 853},     {32, 255},   {219, 1604}, {1, 4},      {64, 255},     {219,802}, { 1,3 },  {2,5} , {1,2} };  //last value 219 802
-
 #elif (F_PLL==192000000)
   const tmclk clkArr[numfreqs] = {{4, 375}, {37, 2517}, {8, 375}, {73, 2483}, {16, 375}, {147, 2500}, {1, 17}, {8, 125}, {147, 1250}, {2, 17}, {16, 125}, {147, 625}, {4, 17}, {32, 125} };
 #elif (F_PLL==216000000)
@@ -816,17 +810,13 @@ void  set_sample_rate (int sr) {
   AudioInterrupts();
   delay(20);
   display_settings();
-
 }
 
 // ***************************************************** SPECTRUM GRAPH
 
 void spectrum() { // spectrum analyser code by rheslip - modified
-     #ifdef USETFT
-     {
-//   
+#ifdef USETFT
   uint16_t OFFSET =ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET;
- //tft.fillRect(0,TOP_OFFSET,ILI9341_TFTWIDTH,OFFSET, COLOR_BLACK);
   int16_t FFT_sbin [128];
   for (int16_t x = 2; x < 128; x++) {
      FFT_sbin[x] = (myFFT.output[x]);//-FFTavg[x]*0.9;
@@ -852,10 +842,6 @@ void spectrum() { // spectrum analyser code by rheslip - modified
      tft.drawFastVLine(g_x+1,TOP_OFFSET+spectrumline,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET-spectrumline, COLOR_BLACK);
      barm[x] = bar;
   }
-
-    // if (mode == MODE_DETECT)  search_bats();
-  } //end if
-  
   #endif
 }
 
@@ -863,16 +849,12 @@ void spectrum() { // spectrum analyser code by rheslip - modified
 // **************** General graph and detector selective functions *******************************************************
 void updatedisplay(void) 
 {
-
 #ifdef USETFT 
 
 // code for 256 point FFT
  if (myFFT.available()) {
-
   const uint16_t Y_OFFSET = TOP_OFFSET;
   static int count = TOP_OFFSET;
-  //int curF=int(freq_real/(sample_rate_real / FFT_points));
-
   // lowest frequencybin to detect as a batcall
   int batCall_LoF_bin= int(25000/(sample_rate_real / FFT_points));
   int batCall_HiF_bin= int(80000/(sample_rate_real / FFT_points));
@@ -883,21 +865,16 @@ void updatedisplay(void)
 
   uint16_t FFT_pixels[240]; // maximum of 240 pixels, each one is the result of one FFT
   memset(FFT_pixels,0,sizeof(FFT_pixels));
-  //FFT_pixels[0]=0; FFT_pixels[1]=0;  FFT_pixels[2]=0; FFT_pixels[3]=0;
-
-    FFTcount++;
-
-    //requested to start with a clean FFTavg array to denoise
-    if (FFTcount==1)
+  FFTcount++;
+  //when FFTcount==1 then clean the FFTavg array to start denoising
+  if (FFTcount==1)
        {for (int16_t i = 0; i < 128; i++) {
           FFTavg[i]=0;
        }
      }
-
-    // collect 100 FFT samples for the denoise array
-    if (FFTcount<100)
+  // collect 100 FFT samples for the denoise array
+  if (FFTcount<100)
      { for (int i = 2; i < 128; i++) {
-         //FFTavg[i]=FFTavg[i]+myFFT.read(i)*65536.0*5*0.001; //0.1% of total values
          FFTavg[i]=FFTavg[i]+myFFT.output[i]*10*0.001; //0.1% of total values
          }
      }
@@ -906,7 +883,6 @@ void updatedisplay(void)
     int peak=512;
     int avgFFTbin=0;
     // there are 128 FFT different bins only 120 are shown on the graphs
-   
     for (int i = spec_lo; i < spec_hi; i++) {
       int val = myFFT.output[i]*10 -FFTavg[i]*0.9 + 10; //v1
       avgFFTbin+=val;
@@ -915,32 +891,28 @@ void updatedisplay(void)
        { peak=val;
          FFT_peakF_bin=i;
         }
-       if (val<5)
+      if (val<5)
            {val=5;}
 
-       uint8_t pixpos=(i-spec_lo)*spec_width;
-       FFT_pixels[pixpos] = tft.color565(
+      uint8_t pixpos=(i-spec_lo)*spec_width;
+      FFT_pixels[pixpos] = tft.color565(
               min(255, val/2),
               (val/6>255)? 255 : val/6,
-              //(val/4>255)? 255 : val/4
-                            0
-              //((255-val)>>1) <0? 0: (255-val)>>1
-             );
+               0  );
       for (int j=1; j<spec_width; j++)
          { FFT_pixels[pixpos+j]=FFT_pixels[pixpos];
          }
     }
 
     avgFFTbin=avgFFTbin/(spec_hi-spec_lo);
-    if ((peak/avgFFTbin)<1.1) //very low peakvalue so probably noise
+    if ((peak/avgFFTbin)<1.1) //very low peakvalue so probably a lot of noise, dont detect this as a peak
      { FFT_peakF_bin=0;
      }
 
   int powerSpectrum_Maxbin=0;
   // detected a peak in the bat frequencies
     if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin))
-    {
-        //collect data for the powerspectrum
+    { //collect data for the powerspectrum
       for (int i = spec_lo; i < spec_hi; i++)
       {    //add new samples
           FFTpowerspectrum[i]+=myFFT.output[i];
@@ -956,15 +928,13 @@ void updatedisplay(void)
  
     if (displaychoice==spectrumgraph)
         { if (detector_mode==detector_Auto_TE)
-            {  if(powerspectrumCounter%5==0) 
+            {  if(powerspectrumCounter%5==0) //update the spectrum every 5th sample
                     { spectrum();
                     }
             }
           else
-          {
-            if(FFTcount%2==0) 
+          { if(FFTcount%2==0) //update the spectrum every 2nd sample
                 spectrum();
-
           }
         }   
 
@@ -972,16 +942,15 @@ void updatedisplay(void)
     if (displaychoice==waterfallgraph)
       if ((powerspectrumCounter>50)  )
        { powerspectrumCounter=0;
-                  
          //clear powerspectrumbox
          tft.fillRect(0,TOP_OFFSET-POWERGRAPH-SPECTRUMSCALE,ILI9341_TFTWIDTH,POWERGRAPH, COLOR_BLACK);
-           
          // keep a minimum maximumvalue to the powerspectrum
          int binLo=spec_lo; int binHi=0;
-         //find the nearest frequencies below 10% of the maximum
+         //find the nearest frequencies below 10% of the maximum to show on screen as values
          if (powerSpectrum_Maxbin!=0)
            {
               boolean searchedge=true;
+              //lowest value
               int i=powerSpectrum_Maxbin;
               while(searchedge) {
                    if ((FFTpowerspectrum[i]/(powerspectrum_Max+1))>0.1)
@@ -996,6 +965,7 @@ void updatedisplay(void)
                      }
 
                   }
+              //highest value
               searchedge=true;
               i=powerSpectrum_Maxbin;
               while(searchedge) {
@@ -1034,15 +1004,13 @@ void updatedisplay(void)
           tft.print(" ");
           tft.setTextColor(ENC_VALUE_COLOR);
           tft.print(int(binHi* bin2frequency) );
-          tft.print('*');
-          tft.print(spectrum_mode);
-        
+          
        }
 
-
-    if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin)) // we got a high-frequent signal peak
+    //signal detected in the detection range
+    if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin)) 
       {
-        // when a batcall is first discovered
+        // check if it is a new discovered signal in the detection range
         if (not Ultrasound_detected)
           { started_detection=0; //start of the call mark
             //clicker=0;
@@ -1064,26 +1032,18 @@ void updatedisplay(void)
                granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
                granular1.setSpeed(0.05);
                TE_ready=false;
-
              }
-
           }
          //clicker++;
          Ultrasound_detected=true;
-
      }
-   else // FFT_peakF_bin does not show a battcall
+   else // we allready have detected a signal in the detection range
         {
           if (Ultrasound_detected) //previous sample was still a call
            { callLength=started_detection; // got a pause so store the time since the start of the call
-
-             /*if (callLength>40) //call is too long
-              { TE_ready=true; // break the TE replay
-                }
-             */
              end_detection=0; //start timing the length of the replay
              }
-          Ultrasound_detected=false;
+          Ultrasound_detected=false; // set the end of the call
         }
     // restart TimeExpansion recording a bit after the call has finished completely
     if ((!TE_ready) and (started_detection>(80)))
@@ -1100,33 +1060,25 @@ void updatedisplay(void)
           tft.setScroll(count);
         count++;
         }
-
       }
-
      if (count >= ILI9341_TFTHEIGHT-BOTTOM_OFFSET) count = Y_OFFSET;
    }
-
-   
   }
 #endif
-
 }
 
 
 // ****************************************************  RECORDING
-
-
 void startRecording() {
   #ifdef USESD1
-
-    #ifdef DEBUGSERIAL
+  countRAWfiles(); //update the counter 
+  #ifdef DEBUGSERIAL
       Serial.print("startRecording");
-    #endif
+  #endif
 
     // close file
     if(isFileOpen)
-    {
-      //close file
+    { //close file
       rc = f_close(&fil);
       #ifdef DEBUGSERIAL
       if (rc) die("close", rc);
@@ -1134,23 +1086,22 @@ void startRecording() {
       isFileOpen=0;
     }
 
+ if (filecounter<MAX_FILES) // limit files to MAX_FILES
   if(!isFileOpen)
   {
-  file_number++;
+  filecounter++;
   //automated filename BA_S.raw where A=file_number and S shows samplerate. Has to fit 8 chars
   // so max is B999_192.raw
-  sprintf(filename, "B%u_%s.raw", file_number, SRtext);
+  sprintf(filename, "B%u_%s.raw", filecounter, SRtext);
     #ifdef DEBUGSERIAL
+    Serial.println('start recording');
     Serial.println(filename);
     #endif
   char2tchar(filename, 13, wfilename);
-  filecounter++;
-  strcpy(filelist[filecounter],filename );
-
   rc = f_stat (wfilename, 0);
-  #ifdef DEBUGSERIAL
+#ifdef DEBUGSERIAL
     Serial.printf("stat %d %x\n",rc,fil.obj.sclust);
- #endif
+#endif
   rc = f_open (&fil, wfilename, FA_WRITE | FA_CREATE_ALWAYS);
 #ifdef DEBUGSERIAL
     Serial.printf(" opened %d %x\n\r",rc,fil.obj.sclust);
@@ -1303,8 +1254,6 @@ if (EncLeft_menu_idx==MENU_PLY)
       outputMixer.gain(2,1);  //player to output
       outputMixer.gain(1,0);  //shutdown granular output
       outputMixer.gain(0,0);  //shutdown heterodyne output
-      // EncRight_menu_idx=MENU_SR;
-      // EncRight_function=enc_value;
       freq_real_backup=freq_real; //keep track of heterodyne setting
   }
   //direct play is used to test functionalty based on previous recorded data
@@ -1321,9 +1270,7 @@ if (EncLeft_menu_idx==MENU_PLD)
 
 //allow settling
   delay(100);
-
-  //keep track of the sample_rate
-  last_sample_rate=sample_rate;
+  
   SR=constrain(SR,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
   set_sample_rate(SR);
 
@@ -1366,7 +1313,6 @@ void stopPlaying() {
 
   inputMixer.gain(0,1); //switch on the mic-line
   inputMixer.gain(1,0); //switch off the playerline
-
  
 }
 
@@ -1377,11 +1323,12 @@ void continuePlaying() {
    {if (!player.isPlaying()) {
      stopPlaying();
     if (continousPlay) //keep playing until stopped by the user
-      { startPlaying(SAMPLE_RATE_22K);
+      { startPlaying(play_rate);
       }
     }
    }
 }
+
 
 // ******************************************************* MODES *****************************
 void defaultMenuPosition()
@@ -1456,15 +1403,12 @@ void updateEncoder(uint8_t Encoderside )
    int menu_idx=0;
    int choices=0;
 
-    //get encodermode
+    //get encoderdata depending on which encoder sent data
    if (Encoderside==enc_leftside)
     { encodermode=EncLeft_function;
       change=EncLeftchange;
       menu_idx=EncLeft_menu_idx;
       choices=Leftchoices; //available menu options
-      #ifdef DEBUGSERIAL
-              Serial.println("EncoderLeft");
-      #endif
     }
 
    if (Encoderside==enc_rightside)
@@ -1504,7 +1448,7 @@ void updateEncoder(uint8_t Encoderside )
                }
     }
 
-  //encoder is in valuemode and has changed position
+  //encoder is in valuemode and has changed position so change an active setting
   if ((encodermode==enc_value) and (change!=0))
     {
       /******************************VOLUME  ***************/
@@ -1522,11 +1466,11 @@ void updateEncoder(uint8_t Encoderside )
          mic_gain+=change;
          mic_gain=constrain(mic_gain,0,63);
          set_mic_gain(mic_gain);
-         FFTcount=0; //start denoise after changing gain
+         FFTcount=0; //always start denoise after changing gain
          //reset FFTdenoise array
          {for (int16_t i = 0; i < 128; i++) {
-           FFTavg[i]=0;
-         }}
+           FFTavg[i]=0;}
+         }
         }
       /******************************FREQUENCY  ***************/
       if (menu_idx==MENU_FRQ)
@@ -1548,17 +1492,9 @@ void updateEncoder(uint8_t Encoderside )
          }
       /******************************DENOISE  ***************/
       if (menu_idx==MENU_DNS)
-        { // setting FFTcount to 0 re-activates a 1000 sample denoise
+        { // setting FFTcount to 0 re-activates a denoise sequence
           FFTcount=0;
         }
-
-      if (menu_idx==MENU_SPECTRUMMODE)
-        { 
-           spectrum_mode+=change;
-           spectrum_mode=spectrum_mode%3; // 0..2 0=full (2pix), 1=25-90 (4pix), 2=25-70 (6pix)
-                   
-        }
-
 
       /******************************LBUTTON SET MODE  ***************/
       if (menu_idx==MENU_BUTTONL)
@@ -1600,36 +1536,9 @@ void updateEncoder(uint8_t Encoderside )
               tft.print(tstr);
               lastmillis=millis();
             }
-        //  if (Encoderside==enc_rightside)
-        //     {
-        //       int minu=tx.tm_min;
-        //       minu=minu+change;
-        //       minu=constrain(minu,0,59);
-
-        //     }
-
-
       }  
-      /******************************DISPLAY  ***************/
 
-      // if (menu_idx==MENU_DSP)
-      //    {
-      //      displaychoice+=change;
-      //      displaychoice=displaychoice%3; //limit to 0(none),1(spectrum),2(waterfall)
-      //      if (displaychoice==waterfallgraph)
-      //         {  tft.setRotation( 0 );
-      //         }
-      //      if (displaychoice==spectrumgraph)
-      //        {  tft.setScroll(0);
-      //           tft.setRotation( 0 );
-      //         }
-      //       tft.fillScreen(COLOR_BLACK); //blank the screen
-      //   }
-
-
-/************** SPECIAL MODES WHERE THE LEFTENCODER SETS A FUNCTION AND THE RIGHT ENCODER SELECTS */
-
-      /******************************SAMPLE_RATE  ***************/
+      /******************************MAIN SAMPLE_RATE   ***************/
       if ((EncLeft_menu_idx==MENU_SR) and (EncLeft_function==enc_value))  //only selects a possible sample_rate, user needs to press a button to SET sample_rate
         { sample_rate+=EncLeftchange;
           sample_rate=constrain(sample_rate,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
@@ -1641,17 +1550,17 @@ void updateEncoder(uint8_t Encoderside )
       if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value))//menu selected file to be played
          {  fileselect+=EncLeftchange;
             fileselect=constrain(fileselect,0,filecounter-1);
-
          }
 
-      // /******************************CHANGE SR during PLAY  ***************/
-      // if ((EncLeft_menu_idx==MENU_PLY) and (EncRight_menu_idx==MENU_SR) and (EncRight_function==enc_value))//menu play selected on the left and right
-      //     {if (LeftButton_Mode==MODE_PLAY)
-      //         {  sample_rate+=EncRightchange;
-      //            sample_rate=constrain(sample_rate,SAMPLE_RATE_8K,SAMPLE_RATE_44K);
-      //            set_sample_rate(sample_rate);
-      //         }
-      //   }
+      /******************************CHANGE PLAY SR   ***************/
+      if ((EncLeft_menu_idx==MENU_PLY) and (EncRight_menu_idx==MENU_SR) and (EncRight_function==enc_value))//menu play selected on the left and right
+          {if (LeftButton_Mode==MODE_PLAY)
+              {  sample_rate+=EncRightchange;
+                 sample_rate=constrain(sample_rate,SAMPLE_RATE_8K,SAMPLE_RATE_44K);
+                 set_sample_rate(sample_rate);
+                 play_rate=sample_rate;
+              }
+        }
     }
  }
 // **************************  ENCODERS
@@ -1705,10 +1614,9 @@ void updateButtons()
           #ifdef DEBUGSERIAL
               Serial.println("micropushL 1");
           #endif
-            { stopRecording();
-              display_settings();
-              recorderActive=false;
-              }
+         stopRecording();
+         display_settings();
+         recorderActive=false;
        }
    }
  else // ************** NORMAL BUTTON PROCESSING
@@ -1720,7 +1628,7 @@ void updateButtons()
     micropushButton_L.update();
     micropushButton_R.update();
 
-  //rightbutton is dedicated to detectormode
+  //rightbutton is completely dedicated to detectormode
    if (micropushButton_R.risingEdge()) {
         detector_mode++;
         if (detector_mode>detector_passive)
@@ -1728,7 +1636,7 @@ void updateButtons()
         changeDetector_mode();
         display_settings();
     }
-   //leftbutton can change function based on leftbutton_mode)
+   //leftbutton function is based on leftbutton_mode)
     if (micropushButton_L.risingEdge()) {
         if (LeftButton_Mode==MODE_DISPLAY) 
           {
@@ -1743,12 +1651,12 @@ void updateButtons()
               }
              tft.fillScreen(COLOR_BLACK); //blank the screen
             }
+
         if (LeftButton_Mode==MODE_PLAY)
           {
             if (playActive==false) //button pressed whilst not playing so start
-              {last_sample_rate=sample_rate;
-               playActive=true;
-                startPlaying(SAMPLE_RATE_22K);
+              { playActive=true;
+                startPlaying(play_rate);
               }
               else
               { stopPlaying();
@@ -1758,7 +1666,7 @@ void updateButtons()
 
         if (LeftButton_Mode==MODE_REC) 
         { 
-            #ifdef DEBUGSERIAL
+          #ifdef DEBUGSERIAL
               Serial.println("micropushL 2");
           #endif
         
@@ -1779,37 +1687,32 @@ void updateButtons()
       EncLeft_function=!EncLeft_function; 
 
       if ((EncLeft_menu_idx==MENU_BUTTONL)  )  
-          {LeftButton_Mode=LeftButton_Next; //select the choosen function
+          {LeftButton_Mode=LeftButton_Next; //select the choosen function for the leftbutton
           }
-      
 
      if (SD_ACTIVE)
      {
        //play menu got choosen, make sure the LeftButton now also switched to Play mode
         if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) //choose to select values
-         { LeftButton_Mode=MODE_PLAY; // directly set LEFTBUTTON to play/stop mode
+         { //keep track of the sample_rate
+           last_sample_rate=sample_rate;
+           sample_rate=play_rate;
+           LeftButton_Mode=MODE_PLAY; // directly set LEFTBUTTON to play/stop mode
+           countRAWfiles(); // update the filelist
+           //set the right encoder to samplerate
+           EncRight_menu_idx=MENU_SR;
+           EncRight_function=enc_value; 
            #ifdef DEBUGSERIAL
               Serial.println("direct set MODEPLAY");
            #endif   
          }
-        //automatically change LEFTbutton back to displaymode if it was on play
+        //automatically change LEFTbutton back to displaymode if it was on play previously
         if ((EncLeft_function==enc_menu) and (LeftButton_Mode==MODE_PLAY))
-          {LeftButton_Mode=MODE_DISPLAY;}
-        // if ((LeftButton_Mode==MODE_PLAY) and ((EncLeft_menu_idx==MENU_PLY) or (EncLeft_menu_idx==MENU_PLD)))
-        //          { stopPlaying();
-        //            EncLeft_menu_idx=MENU_PLY;
-        //            EncLeft_function=enc_menu; //force into active-menu
-        //            continousPlay=false;
-        //          }
-        
-        //Direct play menu got choosen, now change the rightencoder to choose a file
-        // if ((EncLeft_menu_idx==MENU_PLD) and (EncLeft_function==enc_value))
-        //  {
-        //    EncRight_menu_idx=MENU_FRQ ;
-        //    EncRight_function=enc_value; // set the rightcontroller to select
-        //  }
-
-        
+          {LeftButton_Mode=MODE_DISPLAY;
+           sample_rate=last_sample_rate;
+           set_sample_rate(last_sample_rate);
+           }
+                
      } //END SD_ACTIVE
      display_settings();
     }
@@ -1819,39 +1722,6 @@ void updateButtons()
     if (encoderButton_R.risingEdge())
     {
       EncRight_function=!EncRight_function; //switch between menu/value control
-
-      //recording and playing are only possible with an active SD card
-      // if (SD_ACTIVE)
-      //  {
-      //   if (EncLeft_menu_idx==MENU_REC)
-      //         {
-      //           if (LeftButton_Mode == MODE_DETECT)
-      //              startRecording();
-      //           }
-      //           else
-      //             if (LeftButton_Mode==MODE_PLAY)
-      //               {
-      //                   if (not continousPlay)
-      //                     { stopPlaying();
-      //                       EncLeft_menu_idx=MENU_PLY;
-      //                       EncLeft_function=enc_menu;
-      //                     }
-      //               }
-      //             else
-      //             if (LeftButton_Mode==MODE_DETECT)
-      //               { if (EncLeft_menu_idx==MENU_PLY)
-      //                   { last_sample_rate=sample_rate;
-      //                     startPlaying(SAMPLE_RATE_8K);
-      //                   }
-      //                 if (EncLeft_menu_idx==MENU_PLD)
-      //                   {  fileselect=referencefile;
-      //                       continousPlay=true;
-      //                       last_sample_rate=sample_rate;
-      //                       startPlaying(SAMPLE_RATE_281K);
-      //                   }
-      //               }
-      //  }
-
       display_settings();
     }
 
@@ -1875,6 +1745,7 @@ void setup() {
   delay(200);
 
 //setup Encoder Buttonpins with pullups
+
   pinMode(encoderButton_RIGHT,INPUT_PULLUP);
   pinMode(encoderButton_LEFT,INPUT_PULLUP);
 
@@ -1882,8 +1753,8 @@ void setup() {
   pinMode(MICROPUSH_LEFT,INPUT_PULLUP);
 
   // startup menu
-  EncLeft_menu_idx=MENU_VOL;
-  EncRight_menu_idx=MENU_FRQ;
+  EncLeft_menu_idx=MENU_VOL; //volume
+  EncRight_menu_idx=MENU_FRQ; //frequency
   EncLeft_function=enc_menu;
   EncRight_function=enc_menu;
 
@@ -1892,7 +1763,7 @@ void setup() {
 
   setSyncProvider(getTeensy3Time);
 
-// Enable the audio shield. select input. and enable output
+// Enable the audio shield. select microphone as input. and enable output
   sgtl5000.enable();
   sgtl5000.inputSelect(myInput);
   sgtl5000.volume(0.45);
@@ -1908,14 +1779,22 @@ void setup() {
   tft.fillScreen(COLOR_BLACK);
   tft.setCursor(0, 0);
   tft.setScrollarea(TOP_OFFSET,BOTTOM_OFFSET);
-  display_settings();
+  
   tft.setCursor(80,50);
-  tft.setFont(Arial_24);
+  tft.setFont(Arial_20);
   char tstr[9];
   struct tm tx = seconds2tm(RTC_TSR);
   snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
   tft.print(tstr);
-  delay(2000); //wait a second to clearly show the time
+  tft.setCursor(0,90);
+  tft.print("Teensy Batdetector");
+  tft.setCursor(20,120);
+  tft.print(versionStr);
+  
+  delay(5000); //wait  seconds to clearly show the time
+
+
+  display_settings();
 #endif
 
 //Init SD card use
@@ -1933,46 +1812,14 @@ void setup() {
   else  {
     SD_ACTIVE=true;
     tft.fillCircle(70,50,5,COLOR_GREEN);
-    filecounter=0;
-    root = SD.open("/");
-
-    //TODO: check if file is a RAW file and also read the SAMPLERATE
-    while (true) {
-        File entry =  root.openNextFile();
-        if (! entry) {
-          // no more files
-          tft.setCursor(0,50);
-          tft.print(filecounter);
-          break;
-        }
-
-        if (entry.isDirectory()) {
-          // do nothing, only look for raw files in the root
-        }
-        else   {
-          strcpy(filelist[filecounter],entry.name() );
-          if (String(entry.name())=="TEST_281.RAW")
-             {referencefile=filecounter;
-              }
-          filecounter++;
-        }
-        entry.close();
-       }
+    countRAWfiles();
+    
     }
 
 if (SD_ACTIVE)
 // Recording on SD card by uSDFS library
   {f_mount (&fatfs, (TCHAR *)_T("0:/"), 0);      /* Mount/Unmount a logical drive */
-   for (int i=0; i<filecounter; i++)
-     {
-       #ifdef DEBUGSERIAL
-          #ifdef USETFT
-            tft.setCursor(0,50+i*20);
-            tft.print(filelist[i]);
-          #endif
-      #endif
-     }
-     file_number=filecounter+1;
+    
   }
 #endif
 
@@ -2012,8 +1859,18 @@ void loop()
       {continuePlaying();
        }
   }
-
   
+ updateButtons();
+
+  // during recording screens are not updated to reduce interference !
+ if (not recorderActive)
+  { updateEncoders();
+    #ifdef USETFT
+    updatedisplay();
+    #endif
+   }
+
+  //update the time regularly
   struct tm tx = seconds2tm(RTC_TSR);
   if (tx.tm_min!=old_time_min)
   { tft.setFont(Arial_16);
@@ -2025,20 +1882,5 @@ void loop()
     old_time_min=tx.tm_min;
   }
 
-  updateButtons();
-
-  // during recording screens are not updated to reduce interference !
-  if (not recorderActive)
-  { updateEncoders();
-    #ifdef USETFT
-    updatedisplay();
-    // if (displaychoice==waterfallgraph)
-    //   { waterfall();
-    //    }
-    // else
-    //   if (displaychoice==spectrumgraph)
-    //     {  spectrum();
-    //     }
-    #endif
-   }
+  
 }
