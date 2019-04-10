@@ -569,13 +569,21 @@ void display_settings() {
 
     tft.setFont(Arial_16);
     tft.fillRect(0,0,240,TOP_OFFSET-50,MENU_BCK_COLOR);
-    tft.fillRect(0,TOP_OFFSET-30,240,30,COLOR_BLACK);
+    if (displaychoice==spectrumgraph)
+      { tft.fillRect(0,TOP_OFFSET-30,240,30,COLOR_BLACK);
+      }
+    if (displaychoice==waterfallgraph)  
+    { tft.fillRect(0,TOP_OFFSET-6,240,6,COLOR_BLACK);
+      }
+    
     tft.fillRect(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET,240,BOTTOM_OFFSET_PART,MENU_BCK_COLOR);
     tft.fillRect(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART,240,BOTTOM_OFFSET,MENU_BCK_COLOR_PART);
 
     tft.setCursor(0,0);
     tft.print("g:"); tft.print(mic_gain);
-    //tft.print(" f:"); tft.print(freq_real);
+    if (displaychoice==waterfallgraph)
+       {tft.print(" f:"); tft.print(int(freq_real/1000));
+       }
     tft.print(" v:"); tft.print(volume);
     tft.print(" SR"); tft.print(SRtext);
     //tft.print(" M"); tft.print(LeftButton_Mode); tft.print(LeftButton_Next);
@@ -707,11 +715,10 @@ void display_settings() {
         for (int i=1; i<maxScale; i++)
         { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
         }
-
-        //tft.fillCircle(curF,TOP_OFFSET-4,3,ENC_MENU_COLOR);
-        tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
-        //if (detector_mode==detector_Auto_heterodyne)
-          { char tstr[9];
+        tft.fillCircle(curF,TOP_OFFSET-3,3,ENC_MENU_COLOR);
+        if (displaychoice==spectrumgraph)
+          { //tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
+            char tstr[9];
             snprintf(tstr,9, "%02d", int(freq_real/1000));
             tft.setCursor(curF-10,TOP_OFFSET-30);  
             tft.print(tstr);
