@@ -4,9 +4,9 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.82 20190410"
+#define batversion "v0.84 20190608"
 /***********************************************************************
- *  TEENSY 3.6 BAT DETECTOR V0.82 20190410
+ *  TEENSY 3.6 BAT DETECTOR V0.84 20190608
  *
  *  Copyright (c) 2019, Cor Berrevoets, registax@gmail.com
  *
@@ -110,12 +110,13 @@
 */
 
 // ***************************** GLOBAL DEFINES
-#define DEBUGSERIAL
+//#define DEBUGSERIAL
 
 //USE a TFT (code will not function properly without !!! )
 #define USETFT
 //SD1 uses default SDcard Fat, TODO !! SD2 uses faster SDIO library
 #define USESD1
+
 
 // ************************************  SD *****************************
 #ifdef USESD1
@@ -151,7 +152,6 @@
 // *************************** LIBRARIES **************************
 
 #include <TimeLib.h>
-
 #include "Audio.h"
 #include <SPI.h>
 #include <Bounce.h>
@@ -159,6 +159,8 @@
 // *************************** VARS  **************************
 
 String versionStr=batversion;
+boolean EEsettingschanged=false;
+
 boolean SD_ACTIVE=false;
 boolean continousPlay=false;
 boolean recorderActive=false;
@@ -170,6 +172,8 @@ boolean TE_ready=true; //when a TEcall is played this signals the end of the cal
 time_t getTeensy3Time()
 {  return Teensy3Clock.get();
 }
+
+
 
 int helpmin; // definitions for time and date adjust - Menu
 int helphour;
@@ -318,7 +322,8 @@ const int myInput = AUDIO_INPUT_MIC;
 extern "C" uint32_t usd_getError(void);
 
 // **************************** TIME VARS ********************************************
-struct tm seconds2tm(uint32_t tt);
+//struct tm seconds2tm(uint32_t tt);
+
 //continous timers
 elapsedMillis started_detection; //start timing directly after FFT detects an ultrasound
 elapsedMillis end_detection; //start timing directly after FFT detects the end of the ultrasound
@@ -347,8 +352,8 @@ int16_t granularMemory[GRANULAR_MEMORY_SIZE];
 // ******************** SPECTRUM MODES ********************
 
 
-#define waterfallgraph 1
-#define spectrumgraph 2
+#define waterfallgraph 2
+#define spectrumgraph 1
 
 int idx_t = 0;
 int idx = 0;
@@ -436,7 +441,7 @@ float FFTpowerspectrum[128];
 float powerspectrum_Max=0;
 
 // defaults at startup functions
-int displaychoice=waterfallgraph; //default display
+int display_mode=spectrumgraph; //default display
 int8_t mic_gain = 50; // start detecting with this MIC_GAIN in dB
 int8_t volume=50;
 
@@ -497,6 +502,7 @@ int detector_mode=detector_heterodyne;
 
 void countRAWfiles()
 {
+#ifdef USESD
     filecounter=0;
     root = SD.open("/");
 
@@ -517,6 +523,7 @@ void countRAWfiles()
         }
         entry.close();
        }
+#endif       
 }
 
 
@@ -569,10 +576,10 @@ void display_settings() {
 
     tft.setFont(Arial_16);
     tft.fillRect(0,0,240,TOP_OFFSET-50,MENU_BCK_COLOR);
-    if (displaychoice==spectrumgraph)
+    if (display_mode==spectrumgraph)
       { tft.fillRect(0,TOP_OFFSET-30,240,30,COLOR_BLACK);
       }
-    if (displaychoice==waterfallgraph)  
+    if (display_mode==waterfallgraph)  
     { tft.fillRect(0,TOP_OFFSET-6,240,6,COLOR_BLACK);
       }
     
@@ -581,7 +588,7 @@ void display_settings() {
 
     tft.setCursor(0,0);
     tft.print("g:"); tft.print(mic_gain);
-    if (displaychoice==waterfallgraph)
+    if (display_mode==waterfallgraph)
        {tft.print(" f:"); tft.print(int(freq_real/1000));
        }
     tft.print(" v:"); tft.print(volume);
@@ -608,13 +615,13 @@ void display_settings() {
        default:
         tft.print("error");
      }
-
+     #ifdef USESD
      struct tm tx = seconds2tm(RTC_TSR);
      tft.setCursor(180,20);
      char tstr[9];
      snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
      tft.print(tstr);
-     
+     #endif
      
      /****************** SHOW ENCODER/BUTTON SETTING ***********************/
      
@@ -633,7 +640,10 @@ void display_settings() {
          }
       
        if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) // when play selected only show filename
-           { tft.print(filelist[fileselect]);
+           { 
+             #ifdef USESD
+             tft.print(filelist[fileselect]);
+             #endif
            }
        else 
        {       tft.print(MenuEntry[EncLeft_menu_idx]);
@@ -708,7 +718,7 @@ void display_settings() {
      }  
 
     //scale every 10kHz
-    if (displaychoice>0)
+    if (display_mode>0)
       { float x_factor=10000/(0.5*(sample_rate_real / FFT_points));
         int curF=2*int(freq_real/(sample_rate_real / FFT_points));
         int maxScale=int(sample_rate_real/20000);
@@ -716,7 +726,7 @@ void display_settings() {
         { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
         }
         tft.fillCircle(curF,TOP_OFFSET-3,3,ENC_MENU_COLOR);
-        if (displaychoice==spectrumgraph)
+        if (display_mode==spectrumgraph)
           { //tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
             char tstr[9];
             snprintf(tstr,9, "%02d", int(freq_real/1000));
@@ -816,6 +826,7 @@ void  set_sample_rate (int sr) {
   set_freq_Oscillator (freq_real);
   AudioInterrupts();
   delay(20);
+  EEsettingschanged=true;
   display_settings();
 }
 
@@ -933,7 +944,7 @@ void updatedisplay(void)
       powerspectrumCounter++;
     }
  
-    if (displaychoice==spectrumgraph)
+    if (display_mode==spectrumgraph)
         { if (detector_mode==detector_Auto_TE)
             {  if(powerspectrumCounter%5==0) //update the spectrum every 5th sample
                     { spectrum();
@@ -946,7 +957,7 @@ void updatedisplay(void)
         }   
 
     // update spectrumdisplay after every 50th FFT sample with bat-activity
-    if (displaychoice==waterfallgraph)
+    if (display_mode==waterfallgraph)
       if ((powerspectrumCounter>50)  )
        { powerspectrumCounter=0;
          //clear powerspectrumbox
@@ -1059,7 +1070,7 @@ void updatedisplay(void)
         granular1.stopTimeExpansion();
       }
 
-   if (displaychoice==waterfallgraph)
+   if (display_mode==waterfallgraph)
    {
      if (end_detection<50) //keep scrolling 50ms after the last bat-call
       { //if (TE_ready) //not playing TE
@@ -1092,7 +1103,7 @@ void startRecording() {
       #endif
       isFileOpen=0;
     }
-
+#ifdef USESD
  if (filecounter<MAX_FILES) // limit files to MAX_FILES
   if(!isFileOpen)
   {
@@ -1147,6 +1158,7 @@ void startRecording() {
     isFileOpen=1;
   }
 
+  #endif
   #endif
 
   //clear the screen completely
@@ -1280,16 +1292,16 @@ if (EncLeft_menu_idx==MENU_PLD)
   
   SR=constrain(SR,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
   set_sample_rate(SR);
-
+#ifdef USESD
   fileselect=constrain(fileselect,0,filecounter);
   strncpy(filename, filelist[fileselect],  13);
 
   //default display is waterfall
-  displaychoice=waterfallgraph;
+  //display_mode=waterfallgraph;
   display_settings();
 
   player.play(filename);
-  
+#endif  
 
 }
 
@@ -1555,8 +1567,11 @@ void updateEncoder(uint8_t Encoderside )
 
       /******************************SELECT A FILE  ***************/
       if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value))//menu selected file to be played
-         {  fileselect+=EncLeftchange;
-            fileselect=constrain(fileselect,0,filecounter-1);
+         {  
+           #ifdef USESD
+           fileselect+=EncLeftchange;
+           fileselect=constrain(fileselect,0,filecounter-1);
+           #endif
          }
 
       /******************************CHANGE PLAY SR   ***************/
@@ -1637,6 +1652,7 @@ void updateButtons()
 
   //rightbutton is completely dedicated to detectormode
    if (micropushButton_R.risingEdge()) {
+        EEsettingschanged=true;
         detector_mode++;
         if (detector_mode>detector_passive)
           {detector_mode=0;}
@@ -1647,12 +1663,13 @@ void updateButtons()
     if (micropushButton_L.risingEdge()) {
         if (LeftButton_Mode==MODE_DISPLAY) 
           {
-           displaychoice+=1;
-           displaychoice=displaychoice%3; //limit to 0(none),1(spectrum),2(waterfall)
-           if (displaychoice==waterfallgraph)
+           EEsettingschanged=true;
+           display_mode+=1;
+           display_mode=display_mode%3; //limit to 0(none),1(spectrum),2(waterfall)
+           if (display_mode==waterfallgraph)
               {  tft.setRotation( 0 );
               }
-           if (displaychoice==spectrumgraph)
+           if (display_mode==spectrumgraph)
              {  tft.setScroll(0);
                 tft.setRotation( 0 );
               }
@@ -1738,6 +1755,42 @@ void updateButtons()
 // **************************  END BUTTONS
 
 
+//***********************************************  PRESET STRUCTURES *********************************************
+
+typedef struct {
+	uint8_t display_mode;
+  uint8_t detector_mode;
+  uint8_t volume;
+  uint8_t mic_gain;
+  uint8_t sample_rate;
+  uint8_t play_rate;
+  uint8_t EEversion;
+  
+} EEsettings;
+
+EEsettings Batsettings;
+
+const EEsettings Batsettings_default =
+{ waterfallgraph, 
+  detector_Auto_heterodyne,
+  50,
+  50,
+  SAMPLE_RATE_281K,
+  SAMPLE_RATE_22K,
+  1,  //version
+};
+
+
+byte EEversion=1; //versioning will allow future changes to the saved structure to be handled
+
+void SD_LOAD() {
+   Batsettings=Batsettings_default;
+   
+}
+
+void SD_SAVE() {
+  
+} 
 
 //###########################################################################
 //###########################################################################
@@ -1769,11 +1822,12 @@ void setup() {
   AudioMemory(300);
 
   setSyncProvider(getTeensy3Time);
-
+  
 // Enable the audio shield. select microphone as input. and enable output
   sgtl5000.enable();
   sgtl5000.inputSelect(myInput);
-  sgtl5000.volume(0.45);
+  float V=volume*0.01;
+  sgtl5000.volume(V);
   sgtl5000.micGain (mic_gain);
   //sgtl5000.adcHighPassFilterDisable(); // does not help too much!
   sgtl5000.lineInLevel(0);
@@ -1784,8 +1838,6 @@ void setup() {
   tft.begin();
   tft.setRotation( 0 );
   tft.fillScreen(COLOR_BLACK);
-  tft.setCursor(0, 0);
-  tft.setScrollarea(TOP_OFFSET,BOTTOM_OFFSET);
   
   tft.setCursor(80,50);
   tft.setFont(Arial_20);
@@ -1800,7 +1852,9 @@ void setup() {
   
   delay(5000); //wait  seconds to clearly show the time
 
-
+  tft.setCursor(0, 0);
+  tft.setScrollarea(TOP_OFFSET,BOTTOM_OFFSET);
+  
   display_settings();
 #endif
 
@@ -1853,6 +1907,7 @@ for (int16_t i = 0; i < 128; i++) {
     }
 } // END SETUP
 
+//************************************************************************         LOOP         ******************
 //start the processing loop !
 void loop()
 {
@@ -1887,6 +1942,9 @@ void loop()
     snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
     tft.print(tstr);
     old_time_min=tx.tm_min;
+  
+  
+
   }
 
   
