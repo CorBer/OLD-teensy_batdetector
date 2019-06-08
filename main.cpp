@@ -706,10 +706,10 @@ void display_settings() {
 
     tft.setTextColor(COLOR_YELLOW);
 
-    char* s="MODE";
+    char* s=(char*)"MODE";
     //currently v0.81 only DETECT 
     if (RightButton_Mode==MODE_DETECT) 
-       s=("DETECT");
+       s=(char*)"DETECT";
 
     if (playActive==false) //dont show rightside menu choice when playing a file to allow the display of a filename
      {uint16_t sx=tft.strPixelLen(s);
@@ -1199,7 +1199,7 @@ void continueRecording() {
   // repeat n_loops times ( * n_buffer * 256 = total amount to write at one time)
   // then write to SD card
 
-  if (recorder.available() >= N_BUFFER  )
+  if (recorder.available() >= int(N_BUFFER)  )
   {// one buffer = 256 (8bit)-bytes = block of 128 16-bit samples
     //read N_BUFFER sample-blocks into memory
     for (uint i = 0; i < N_BUFFER; i++) {
