@@ -17,8 +17,10 @@ Visual Code 1.35.1
 -PlatformIO Home 2.2.0·Core 3.6.7
 
 -platformio.ini
-  [env:teensy36]
-  platform = teensy
-  board = teensy36
-  framework = arduino
+
+  [env:teensy36]<br>
+  
+  platform = teensy<br>
+  board = teensy36<br>
+  framework = arduino<br>
 
