@@ -7,10 +7,13 @@ This is a work in progress project, the code and setup is still changing. If you
 I am using a non-default programming setup for Teensy, that means that the code might not work in other environments.
 
 Setup @2019-06-22
+
 Operating system Linux Mint 19.1
+
 Visual Code 1.35.1
 -PlatformIO Home 2.2.0·Core 3.6.7
- -platformio.ini
+
+-platformio.ini
   [env:teensy36]
   platform = teensy
   board = teensy36
