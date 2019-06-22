@@ -13,6 +13,7 @@ Setup @2019-06-22
 Operating system Linux Mint 19.1
 
 Visual Code 1.35.1
+
 -PlatformIO Home 2.2.0·Core 3.6.7
 
 -platformio.ini
