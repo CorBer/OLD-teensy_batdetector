@@ -1,3 +1,4 @@
+/* COPY for batdetectorproject BASED ON WMXZ Teensy uSDFS library */
 /*
  * WMXZ Teensy uSDFS library
  * Copyright (c) 2016 Walter Zimmer.

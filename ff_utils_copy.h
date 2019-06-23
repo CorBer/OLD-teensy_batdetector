@@ -1,3 +1,5 @@
+/* COPY for batdetectorproject BASED ON WMXZ Teensy uSDFS library */
+
 /*
  * WMXZ Teensy uSDFS library
  * Copyright (c) 2016 Walter Zimmer.
@@ -22,10 +24,12 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+
+
 //ff_utils.h
 //
-#ifndef _FF_UTILS_H
-#define _FF_UTILS_H
+#ifndef _FF_UTILS_COPY_H
+#define _FF_UTILS_COPY_H
 #include <time.h>
 /*---------------------------------------------------------*/
 /* User Provided Timer Function for FatFs module           */
