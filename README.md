@@ -3,7 +3,7 @@ Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes
-<b>v0.85<b> (23 06 2019) 
+<b>v0.85</b> (23 06 2019) 
   -changed the usage of seconds2tm from the ff_utils library, 
    created ff_utils_copy library that is independent of other uSDFS libraries.
 
