@@ -4,9 +4,18 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.84 20190608"
+#define batversion "v0.85 20190623"
+/* changes  
+* v0.85 added ff_utils.h and ff_utils.c (ff_utils_copy) to the main structure to remove depences from uSDFS 
+  changed seconds2tm function into seconds2time
+
+
+*/
+
+
+
 /***********************************************************************
- *  TEENSY 3.6 BAT DETECTOR V0.84 20190608
+ *  TEENSY 3.6 BAT DETECTOR V0.85 20190623
  *
  *  Copyright (c) 2019, Cor Berrevoets, registax@gmail.com
  *
@@ -120,10 +129,10 @@
 
 // ************************************  SD *****************************
 #ifdef USESD1
-  #define USESD
+  //#define USESD
   #include <SD.h>
   #include "ff.h"       // uSDFS lib
-  #include "ff_utils.h" // uSDFS lib
+  #include "ff_utils_copy.h" // uSDFS lib copy
   File root;
   FRESULT rc;        /* Result code */
   FATFS fatfs;      /* File system object */
@@ -322,7 +331,7 @@ const int myInput = AUDIO_INPUT_MIC;
 extern "C" uint32_t usd_getError(void);
 
 // **************************** TIME VARS ********************************************
-//struct tm seconds2tm(uint32_t tt);
+//struct tm seconds2time(uint32_t tt);
 
 //continous timers
 elapsedMillis started_detection; //start timing directly after FFT detects an ultrasound
@@ -616,7 +625,7 @@ void display_settings() {
         tft.print("error");
      }
      #ifdef USESD
-     struct tm tx = seconds2tm(RTC_TSR);
+     struct tm tx = seconds2time(RTC_TSR);
      tft.setCursor(180,20);
      char tstr[9];
      snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
@@ -1525,7 +1534,7 @@ void updateEncoder(uint8_t Encoderside )
       }
       /******************************TIME  ***************/
       if (EncLeft_menu_idx==MENU_TIME)
-      {  //struct tm tx = seconds2tm(RTC_TSR);
+      {  //struct tm tx =seconds2time(RTC_TSR);
          
          if (Encoderside==enc_leftside)
             {
@@ -1550,7 +1559,7 @@ void updateEncoder(uint8_t Encoderside )
     
               tft.setFont(Arial_24);
               char tstr[9];
-              struct tm tx = seconds2tm(RTC_TSR);
+              struct tm tx = seconds2time(RTC_TSR);
               snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
               tft.print(tstr);
               lastmillis=millis();
@@ -1842,7 +1851,7 @@ void setup() {
   tft.setCursor(80,50);
   tft.setFont(Arial_20);
   char tstr[9];
-  struct tm tx = seconds2tm(RTC_TSR);
+  struct tm tx = seconds2time(RTC_TSR);
   snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
   tft.print(tstr);
   tft.setCursor(0,90);
@@ -1933,7 +1942,7 @@ void loop()
    }
 
   //update the time regularly
-  struct tm tx = seconds2tm(RTC_TSR);
+  struct tm tx = seconds2time(RTC_TSR);
   if (tx.tm_min!=old_time_min)
   { tft.setFont(Arial_16);
     tft.setCursor(180,20);
