@@ -14,8 +14,7 @@
 */
 
 /***********************************************************************
- *  TEENSY 3.6 BAT DETECTOR V0.85 20190623
- *
+ *  TEENSY 3.6 BAT DETECTOR 
  *  Copyright (c) 2019, Cor Berrevoets, registax@gmail.com
  *
  *  TODO: use selectable presets
