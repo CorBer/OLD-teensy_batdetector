@@ -4,15 +4,14 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.85 20190623"
+#define batversion "v0.86 20190623"
 /* changes  
-* v0.85 added ff_utils.h and ff_utils.c (ff_utils_copy) to the main structure to remove depences from uSDFS 
+* v0.86 20190623  
+  WMXZ added changes to remove issues when both using SD.h and uSDFS.h, no need for ff_utils anymore
+* v0.85 20190623 
+  added ff_utils.h and ff_utils.c (ff_utils_copy) to the main structure to remove depences from uSDFS 
   changed seconds2tm function into seconds2time
-
-
 */
-
-
 
 /***********************************************************************
  *  TEENSY 3.6 BAT DETECTOR V0.85 20190623
@@ -124,39 +123,8 @@
 //USE a TFT (code will not function properly without !!! )
 #define USETFT
 //SD1 uses default SDcard Fat, TODO !! SD2 uses faster SDIO library
+#define USESD
 #define USESD1
-
-
-// ************************************  SD *****************************
-#ifdef USESD1
-  //#define USESD
-  #include <SD.h>
-  #include "ff.h"       // uSDFS lib
-  #include "ff_utils_copy.h" // uSDFS lib copy
-  File root;
-  FRESULT rc;        /* Result code */
-  FATFS fatfs;      /* File system object */
-  FIL fil;        /* File object */
-#endif
-
-// TODO: try and see if using the SdFs library is able to write faster
-// started setup and included several #ifdefs inside the audio-library SDrelated files (play_raw play_wav)
-#ifdef USESD2
-  #define USESD
-  //#include "SdFs.h"
-  #include "logger_setup.h"
-#endif
-
-//default SD related
-#ifdef USESD
-    #define MAX_FILES    50
-    #define MAX_FILE_LENGTH  13   // 8 chars plus 4 for.RAW plus NULL
-    char filelist[ MAX_FILES ][ MAX_FILE_LENGTH ];
-    int filecounter=0;
-    int fileselect=0;
-    int referencefile=0;
-    
-#endif
 
 // *************************** LIBRARIES **************************
 
@@ -182,7 +150,20 @@ time_t getTeensy3Time()
 {  return Teensy3Clock.get();
 }
 
+typedef struct tm // explicit defined as TimeLib does not allow include of <time.h>
+{
+  int tm_sec;
+  int tm_min;
+  int tm_hour;
+  int tm_mday;
+  int tm_mon;
+  int tm_year;
+  int tm_wday;
+  int tm_yday;
+  int tm_isdst;
+} tm_t;
 
+extern "C" struct tm seconds2tm(uint32_t tt);
 
 int helpmin; // definitions for time and date adjust - Menu
 int helphour;
@@ -203,6 +184,7 @@ uint32_t lastmillis;
 
 // ************************************  TFT *****************************
 // TFT definitions currently only setup for ILI9341
+
 #ifdef USETFT
  #define ILI9341
  #ifdef ILI9341
@@ -288,7 +270,7 @@ uint8_t RightButton_Mode=MODE_DETECT;
 
 // **END************ LEFT AND RIGHT ENCODER DEFINITIONS
 
-
+//#include "effect_granular.h" change by WMXZ
 // *********************************** AUDIO SGTL5000 SETUP *******************************
 // this audio comes from the codec by I2S2
 AudioInputI2S                    i2s_in; // MIC input
@@ -298,6 +280,7 @@ AudioEffectMultiply              heterodyne_multiplier; // multiply = mix
 AudioAnalyzeFFT256               myFFT; // for spectrum display
 AudioPlaySdRaw                   player;
 AudioEffectGranular              granular1;
+//mAudioEffectGranular             granular1; change by WMXZ
 AudioMixer4                      mixFFT;
 AudioMixer4                      outputMixer; //selective output
 AudioMixer4                      inputMixer; //selective input
@@ -323,15 +306,8 @@ const int myInput = AUDIO_INPUT_MIC;
 
 //****************************************************************************************
 
-// forward declaration Stop recording with message
-#ifdef DEBUGSERIAL
-   void die(char *str, FRESULT rc);
-#endif
-
-extern "C" uint32_t usd_getError(void);
 
 // **************************** TIME VARS ********************************************
-//struct tm seconds2time(uint32_t tt);
 
 //continous timers
 elapsedMillis started_detection; //start timing directly after FFT detects an ultrasound
@@ -507,62 +483,14 @@ const char* MenuEntry [Leftchoices] =
 //default
 int detector_mode=detector_heterodyne;
 
-// *********************************** CODE defs
 
-void countRAWfiles()
-{
 #ifdef USESD
-    filecounter=0;
-    root = SD.open("/");
-
-    while (true) {
-        File entry =  root.openNextFile();
-        if ((! entry) and (filecounter < MAX_FILES )) {
-          break;
-        }
-        if (entry.isDirectory()) {
-          // do nothing, only look for raw files in the root
-        }
-        else   {
-        String fname=entry.name();
-         if (fname.indexOf(".RAW"))
-          {strcpy(filelist[filecounter],entry.name() );
-           filecounter++;
-          }
-        }
-        entry.close();
-       }
-#endif       
-}
-
-
-
-#ifdef USESD1
-void die(char *str, FRESULT rc)
-{
-   #ifdef DEBUGSERIAL
-   Serial.printf("%s: Failed with rc=%u.\n", str, rc); for (;;) delay(100);
-   #endif
-   }
-
-//=========================================================================
+  #define MAX_FILES    50
+  #define MAX_FILE_LENGTH  13   // 8 chars plus 4 for.RAW plus NULL
+  char filelist[ MAX_FILES ][ MAX_FILE_LENGTH ];
+  int fileselect=0;
+  int referencefile=0;
 #endif
-
-
-
-#ifdef USESD1
-//uint32_t count=0;
-uint32_t ifn=0;
-uint32_t isFileOpen=0;
-
-TCHAR wfilename[80];
-uint32_t t0=0;
-uint32_t t1=0;
-#endif
-
-char filename[80];
-
-
 // ******************************************** DISPLAY
 
 int calc_menu_dxoffset(const char* str)  // to position the menu on the right screenedge
@@ -576,7 +504,6 @@ int calc_menu_dxoffset(const char* str)  // to position the menu on the right sc
 #endif
   
 }
-
 
 void display_settings() {
   #ifdef USETFT
@@ -624,12 +551,13 @@ void display_settings() {
        default:
         tft.print("error");
      }
-     #ifdef USESD
-     struct tm tx = seconds2time(RTC_TSR);
-     tft.setCursor(180,20);
-     char tstr[9];
-     snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
-     tft.print(tstr);
+
+     #if defined USESD
+      struct tm tx = seconds2tm(RTC_TSR);
+      tft.setCursor(180,20);
+      char tstr[9];
+      snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
+      tft.print(tstr);
      #endif
      
      /****************** SHOW ENCODER/BUTTON SETTING ***********************/
@@ -793,6 +721,9 @@ void setI2SFreq(int freq) {
 //(double)F_PLL * (double)clkArr[iFreq].mult / (256.0 * (double)clkArr[iFreq].div);
 //ex 180000000* 1 /(256* 3 )=234375Hz  setting   {1,3} at 180Mhz
 
+  const int numfreqs = 17;
+  const int samplefreqs[numfreqs] = {  8000,      11025,      16000,      22050,       32000,       44100, (int)44117.64706 , 48000,      88200, (int)44117.64706 * 2,   96000, 176400, (int)44117.64706 * 4, 192000,  234000, 281000, 352800};
+
 #if (F_PLL==16000000)
   const tmclk clkArr[numfreqs] = {{16, 125}, {148, 839}, {32, 125}, {145, 411}, {64, 125}, {151, 214}, {12, 17}, {96, 125}, {151, 107}, {24, 17}, {192, 125}, {127, 45}, {48, 17}, {255, 83} };
 #elif (F_PLL==72000000)
@@ -806,8 +737,6 @@ void setI2SFreq(int freq) {
 #elif (F_PLL==168000000)
   const tmclk clkArr[numfreqs] = {{32, 2625}, {21, 1250}, {64, 2625}, {21, 625}, {128, 2625}, {42, 625}, {8, 119}, {64, 875}, {84, 625}, {16, 119}, {128, 875}, {168, 625}, {32, 119}, {189, 646} };
 #elif (F_PLL==180000000)
-  const int numfreqs = 17;
-  const int samplefreqs[numfreqs] = {  8000,      11025,      16000,      22050,       32000,       44100, (int)44117.64706 , 48000,      88200, (int)44117.64706 * 2,   96000, 176400, (int)44117.64706 * 4, 192000,  234000, 281000, 352800};
   const tmclk clkArr[numfreqs] = {{46, 4043}, {49, 3125}, {73, 3208}, {98, 3125}, {183, 4021}, {196, 3125}, {16, 255},   {128, 1875}, {107, 853},     {32, 255},   {219, 1604}, {1, 4},      {64, 255},     {219,802}, { 1,3 },  {2,5} , {1,2} };  //last value 219 802
 #elif (F_PLL==192000000)
   const tmclk clkArr[numfreqs] = {{4, 375}, {37, 2517}, {8, 375}, {73, 2483}, {16, 375}, {147, 2500}, {1, 17}, {8, 125}, {147, 1250}, {2, 17}, {16, 125}, {147, 625}, {4, 17}, {32, 125} };
@@ -1093,16 +1022,94 @@ void updatedisplay(void)
   }
 #endif
 }
+// ****************************************************  FILE SYSTEMS
+
+int filecounter=0;
+char filename[80];
 
 
-// ****************************************************  RECORDING
-void startRecording() {
-  #ifdef USESD1
-  countRAWfiles(); //update the counter 
-  #ifdef DEBUGSERIAL
-      Serial.print("startRecording");
-  #endif
+// ************************************  SD *****************************
+#ifdef USESD // Used for playback
+  #include <SD.h>
+  File root;
 
+//    #define MAX_FILES    50
+//    #define MAX_FILE_LENGTH  13   // 8 chars plus 4 for.RAW plus NULL
+//    char filelist[ MAX_FILES ][ MAX_FILE_LENGTH ];
+//    int fileselect=0;
+//    int referencefile=0;
+
+
+  void countRAWfiles(void)
+  {
+      filecounter=0;
+      root = SD.open("/");
+
+      while (true) {
+          File entry =  root.openNextFile();
+          if ((! entry) and (filecounter < MAX_FILES )) {
+            break;
+          }
+          if (entry.isDirectory()) {
+            // do nothing, only look for raw files in the root
+          }
+          else   {
+          String fname=entry.name();
+          if (fname.indexOf(".RAW"))
+            {strcpy(filelist[filecounter],entry.name() );
+            filecounter++;
+            }
+          }
+          entry.close();
+        }
+  }
+
+  int initSD(void)
+  {
+     return SD.begin(BUILTIN_SDCARD); 
+  }
+  
+#else
+  int initSD(void) {}
+  void countRAWfiles(void) {}
+#endif
+
+#ifdef USESD1  //uSDFS used for recording (edit uSDFS/utility/sd_config.h)
+  #include "uSDFS.h"       // uSDFS lib
+  FRESULT rc;        /* Result code */
+  FATFS fatfs;      /* File system object */
+  FIL fil;        /* File object */
+
+  // forward declaration Stop recording with message
+  void die(char *str, FRESULT rc)
+  {
+    #ifdef DEBUGSERIAL
+    Serial.printf("%s: Failed with rc = %s.\n", str, FR_ERROR_STRING[rc]); for (;;) delay(100);
+    #endif
+   }
+
+  //uint32_t count=0;
+  uint32_t ifn=0;
+  uint32_t isFileOpen=0;
+
+//  uint32_t t0=0;
+//  uint32_t t1=0;
+  
+  void initREC(void)
+  { const char *Device = "1:/";  // 0: SPI 1;SDIO 2:MSC
+    rc = f_mount (&fatfs, Device, 1);      /* Mount/Unmount a logical drive */
+    #ifdef DEBUGSERIAL
+      if (rc) die("close", rc);
+    #endif
+      
+    rc = f_chdrive(Device);
+    #ifdef DEBUGSERIAL
+      if((rc) die("chdrive",rc);
+   #endif
+  }
+
+  void startREC(void)
+  {
     // close file
     if(isFileOpen)
     { //close file
@@ -1112,63 +1119,144 @@ void startRecording() {
       #endif
       isFileOpen=0;
     }
-#ifdef USESD
- if (filecounter<MAX_FILES) // limit files to MAX_FILES
-  if(!isFileOpen)
-  {
-  filecounter++;
-  //automated filename BA_S.raw where A=file_number and S shows samplerate. Has to fit 8 chars
-  // so max is B999_192.raw
-  sprintf(filename, "B%u_%s.raw", filecounter, SRtext);
-    #ifdef DEBUGSERIAL
-    Serial.println('start recording');
-    Serial.println(filename);
-    #endif
-  char2tchar(filename, 13, wfilename);
-  rc = f_stat (wfilename, 0);
-#ifdef DEBUGSERIAL
-    Serial.printf("stat %d %x\n",rc,fil.obj.sclust);
-#endif
-  rc = f_open (&fil, wfilename, FA_WRITE | FA_CREATE_ALWAYS);
-#ifdef DEBUGSERIAL
-    Serial.printf(" opened %d %x\n\r",rc,fil.obj.sclust);
-#endif
-    // check if file has errors
-    if(rc == FR_INT_ERR)
-    { // only option then is to close file
-        rc = f_close(&fil);
-        if(rc == FR_INVALID_OBJECT)
-        {
-          #ifdef DEBUGSERIAL
-          Serial.println("unlinking file");
-          #endif
-          rc = f_unlink(wfilename);
-          #ifdef DEBUGSERIAL
-          if (rc) {
-            die("unlink", rc);
-          }
-          #endif
-        }
-        else
-        {
-          #ifdef DEBUGSERIAL
-          die("close", rc);
-          #endif
-        }
-    }
-    // retry open file
-    rc = f_open(&fil, wfilename, FA_WRITE | FA_CREATE_ALWAYS);
 
-    if(rc) {
+    if (filecounter<MAX_FILES) // limit files to MAX_FILES
+    if(!isFileOpen)
+    {
+      filecounter++;
+      //automated filename BA_S.raw where A=file_number and S shows samplerate. Has to fit 8 chars
+      // so max is B999_192.raw
+      sprintf(filename, "B%u_%s.raw", filecounter, SRtext);
+        #ifdef DEBUGSERIAL
+        Serial.println('start recording');
+        Serial.println(filename);
+        #endif
+      rc = f_stat (filename, 0);
       #ifdef DEBUGSERIAL
-      die("open", rc);
+          Serial.printf("stat %s\n",STAT_ERROR_STRING[rc]);
       #endif
+      rc = f_open (&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
+      #ifdef DEBUGSERIAL
+          Serial.printf(" opened %s\n\r",FR_ERROR_STRING[rc]);
+      #endif
+      // check if file has errors
+      if(rc == FR_INT_ERR)
+      { // only option then is to close file
+          rc = f_close(&fil);
+          if(rc == FR_INVALID_OBJECT)
+          {
+            #ifdef DEBUGSERIAL
+            Serial.println("unlinking file");
+            #endif
+            rc = f_unlink(filename);
+            #ifdef DEBUGSERIAL
+            if (rc) {
+              die("unlink", rc);
+            }
+            #endif
+          }
+          else
+          {
+            #ifdef DEBUGSERIAL
+            die("close", rc);
+            #endif
+          }
+      }
+      // retry open file
+      rc = f_open(&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
+
+      #ifdef DEBUGSERIAL
+      if(rc) {
+        die("open", rc);
+      }
+      #endif
+      isFileOpen=1;
     }
-    isFileOpen=1;
   }
 
-  #endif
-  #endif
+  void writeREC(AudioRecordQueue *recorder)
+  {  
+    const uint32_t N_BUFFER = 2;
+    const uint32_t N_LOOPS = BUFF*N_BUFFER; // !!! NLOOPS and BUFFSIZE ARE DEPENDENT !!! NLOOPS = BUFFSIZE/N_BUFFER
+    // buffer size total = 256 * n_buffer * n_loops
+    // queue: write n_buffer blocks * 256 bytes to buffer at a time; free queue buffer;
+    // repeat n_loops times ( * n_buffer * 256 = total amount to write at one time)
+    // then write to SD card
+
+    if (recorder->available() >= int(N_BUFFER) )
+    {// one buffer = 256 (8bit)-bytes = block of 128 16-bit samples
+      //read N_BUFFER sample-blocks into memory
+      for (uint i = 0; i < N_BUFFER; i++) 
+      {
+        //copy a new bufferblock from the audiorecorder into memory
+        memcpy(sample_buffer + i*256 + nj * 256 * N_BUFFER, recorder->readBuffer(), 256);
+        //free the last buffer that was read
+        recorder->freeBuffer();
+      }
+
+      nj++;
+
+      if (nj >  (N_LOOPS-1))
+      {
+        nj = 0;
+        //old code used to copy into a 2nd buffer, not needed since the writing to SD of the buffer seems faster than the filling
+        //this allows larger buffers to be used
+        //memcpy(sample_buffer2,sample_buffer,BUFFSIZE);
+        //push to SDcard
+        rc =  f_write (&fil, sample_buffer, N_BUFFER * 256 * N_LOOPS, &wr);
+      }
+    }
+  }
+
+  void stopREC(AudioRecordQueue *recorder)
+  {
+    #ifdef DEBUGSERIAL
+      Serial.print("stopRecording");
+    #endif
+    recorder->end();
+    recorderActive=false;
+    while (recorder->available() > 0) 
+    {
+      rc = f_write (&fil, (byte*)recorder->readBuffer(), 256, &wr);
+  //      frec.write((byte*)recorder->readBuffer(), 256);
+        recorder->freeBuffer();
+    }
+    //close file
+    rc = f_close(&fil);
+    #ifdef DEBUGSERIAL
+    if (rc) die("close", rc);
+    #endif
+    //
+    isFileOpen=0;
+    //  frec.close();
+    //  playfile = recfile;
+  
+    //  LeftButton_Mode = MODE_DISPLAY; 
+    //  clearname();
+    #ifdef DEBUGSERIAL
+      Serial.println (" Recording stopped!");
+    #endif
+  }
+#else
+  void initREC(void){}
+  void startREC(void){}
+  void writeREC(AudioRecordQueue *recorder){}
+  void stopREC(AudioRecordQueue *recorder){}
+
+#endif
+
+#ifdef USESD2
+  //#include "SdFs.h"
+  //#include "logger_setup.h"
+  //  extern "C" uint32_t usd_getError(void);
+
+#endif
+
+
+
+// ****************************************************  RECORDING
+void startRecording() {
+  startREC();
 
   //clear the screen completely
   tft.setScroll(0);
@@ -1197,70 +1285,15 @@ void startRecording() {
   recorder.begin();
 
 }
+
 // ************************************************ continueRecording
-
 void continueRecording() {
-  #ifdef USESD1
-  const uint32_t N_BUFFER = 2;
-  const uint32_t N_LOOPS = BUFF*N_BUFFER; // !!! NLOOPS and BUFFSIZE ARE DEPENDENT !!! NLOOPS = BUFFSIZE/N_BUFFER
-  // buffer size total = 256 * n_buffer * n_loops
-  // queue: write n_buffer blocks * 256 bytes to buffer at a time; free queue buffer;
-  // repeat n_loops times ( * n_buffer * 256 = total amount to write at one time)
-  // then write to SD card
-
-  if (recorder.available() >= int(N_BUFFER)  )
-  {// one buffer = 256 (8bit)-bytes = block of 128 16-bit samples
-    //read N_BUFFER sample-blocks into memory
-    for (uint i = 0; i < N_BUFFER; i++) {
-       //copy a new bufferblock from the audiorecorder into memory
-       memcpy(sample_buffer + i*256 + nj * 256 * N_BUFFER, recorder.readBuffer(), 256);
-       //free the last buffer that was read
-       recorder.freeBuffer();
-       }
-
-    nj++;
-
-    if (nj >  (N_LOOPS-1))
-    {
-      nj = 0;
-      //old code used to copy into a 2nd buffer, not needed since the writing to SD of the buffer seems faster than the filling
-      //this allows larger buffers to be used
-      //memcpy(sample_buffer2,sample_buffer,BUFFSIZE);
-      //push to SDcard
-      rc =  f_write (&fil, sample_buffer, N_BUFFER * 256 * N_LOOPS, &wr);
-      }
-  }
-  #endif
+  writeREC(&recorder);
 }
+
 // ******************************************************** STOP RECORDING
 void stopRecording() {
-#ifdef USESD1
-  #ifdef DEBUGSERIAL
-    Serial.print("stopRecording");
-  #endif
-    recorder.end();
-    recorderActive=false;
-    while (recorder.available() > 0) {
-      rc = f_write (&fil, (byte*)recorder.readBuffer(), 256, &wr);
-  //      frec.write((byte*)recorder.readBuffer(), 256);
-        recorder.freeBuffer();
-      }
-        //close file
-        rc = f_close(&fil);
-        #ifdef DEBUGSERIAL
-        if (rc) die("close", rc);
-        #endif
-        //
-        isFileOpen=0;
-  //    frec.close();
-  //    playfile = recfile;
-    
-  //  LeftButton_Mode = MODE_DISPLAY; 
-  //  clearname();
-  #ifdef DEBUGSERIAL
-    Serial.println (" Recording stopped!");
-  #endif
-#endif
+  stopREC(&recorder);
   //switch on FFT
   tft.fillScreen(COLOR_BLACK);
   mixFFT.gain(0,1);
@@ -1392,13 +1425,13 @@ void changeDetector_mode()
            EncRight_function=enc_value;
          }
   if (detector_mode==detector_divider)
-         { granular1.beginDivider(GRANULAR_MEMORY_SIZE);
+         {  granular1.beginDivider(GRANULAR_MEMORY_SIZE);
            setMixer(granularmixer);
            defaultMenuPosition();
          }
 
   if (detector_mode==detector_Auto_TE)
-         { granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
+         {  granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
            setMixer(granularmixer);
            granular1.setSpeed(0.05); //default TE is 1/0.06 ~ 1/16 :TODO, switch from 1/x floats to divider value x
            defaultMenuPosition();
@@ -1534,7 +1567,7 @@ void updateEncoder(uint8_t Encoderside )
       }
       /******************************TIME  ***************/
       if (EncLeft_menu_idx==MENU_TIME)
-      {  //struct tm tx =seconds2time(RTC_TSR);
+      {  //struct tm tx =seconds2tm(RTC_TSR);
          
          if (Encoderside==enc_leftside)
             {
@@ -1559,7 +1592,7 @@ void updateEncoder(uint8_t Encoderside )
     
               tft.setFont(Arial_24);
               char tstr[9];
-              struct tm tx = seconds2time(RTC_TSR);
+              struct tm tx = seconds2tm(RTC_TSR);
               snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
               tft.print(tstr);
               lastmillis=millis();
@@ -1851,7 +1884,7 @@ void setup() {
   tft.setCursor(80,50);
   tft.setFont(Arial_20);
   char tstr[9];
-  struct tm tx = seconds2time(RTC_TSR);
+  struct tm tx = seconds2tm(RTC_TSR);
   snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
   tft.print(tstr);
   tft.setCursor(0,90);
@@ -1869,8 +1902,8 @@ void setup() {
 
 //Init SD card use
 // uses the SD card slot of the Teensy, NOT that of the audio board !!!!!
-#ifdef USESD1
-  if(!(SD.begin(BUILTIN_SDCARD)))
+
+  if(!initSD())
   {
       #ifdef DEBUGSERIAL
           Serial.println("Unable to access the SD card");
@@ -1883,19 +1916,13 @@ void setup() {
     SD_ACTIVE=true;
     tft.fillCircle(70,50,5,COLOR_GREEN);
     countRAWfiles();
-    
-    }
+  }
 
 if (SD_ACTIVE)
 // Recording on SD card by uSDFS library
-  {f_mount (&fatfs, (TCHAR *)_T("0:/"), 0);      /* Mount/Unmount a logical drive */
-    
+  { 
+    initREC();
   }
-#endif
-
-#ifdef USESD2
- uSD.init();
-#endif
 
 // ***************** SETUP AUDIO *******************************
 set_sample_rate (sample_rate);
@@ -1942,7 +1969,7 @@ void loop()
    }
 
   //update the time regularly
-  struct tm tx = seconds2time(RTC_TSR);
+  struct tm tx = seconds2tm(RTC_TSR);
   if (tx.tm_min!=old_time_min)
   { tft.setFont(Arial_16);
     tft.setCursor(180,20);
