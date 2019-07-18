@@ -3,6 +3,14 @@ Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
+<b>0.88</b><br>
+-EEprom saving added (initial test)
+-Menu expanded with 
+  -TE_speed : replay speed when using Auto_TimeExpansion (20 means 1/20th of original speed)
+  -TE_low : lowest frequency to check for possible signalpeaks that will trigger the TimeExpansion
+  
+
+
 <b>0.86</b><br>
 -changes by WMXZ to use latest uSDFS library and not be depending on ff_utils and SD.h<br>
 
