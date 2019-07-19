@@ -6,6 +6,7 @@ latest changes<br>
 <b>0.88</b><br>(source not yet available, only hex)<br>
 -EEprom saving added (initial test)<br>
 -Menu expanded with <br>
+- Preset: Default (as programmed) or User (saved at that moment)
      -  TE_speed : replay speed when using Auto_TimeExpansion (20 means 1/20th of original speed)<br>
      -  TE_low : lowest frequency to check for possible signalpeaks that will trigger the TimeExpansion<br>
   
