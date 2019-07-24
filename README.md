@@ -3,7 +3,7 @@ Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
-<b>0.88</b><br>(source not yet available, only hex)<br>
+<b>0.88</b><br>(source and hex)<br>
 -EEprom saving added (initial test)<br>
 -Menu expanded with <br>
 - Preset: Default (as programmed) or User (saved at that moment)
