@@ -1,11 +1,20 @@
 //PROCEDURE FOR LINUX DIRECT UPLOAD when using PLATFORMIO
+// Dont forget Install Step 2: (Linux only) Install udev Rules
+//The udev rule file gives non-root users permission to use the Teensy devices (serial, HID, etc). More Linux tips below.
+//sudo cp 49-teensy.rules /etc/udev/rules.d/
 //CALL TEENSY_LOADER and SELECT HEX (located in subdir .pioenvs/teensy36)
 //CALL TEENSY_REBOOT ... this will then directly upload the HEX
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.86 20190623"
+#define batversion "v0.88 20190718"
+#define versionno 88 // used in EEProm storage
 /* changes  
+* v0.88 EEprom setup done
+
+* v0.87 allow to set low-detection frequency for auto_te via MENU TE_LOW
+        allow the auto_te divider to be set via MENU TE_SPEED
+        changed detection routine for auto_te, removed the denoising section
 * v0.86 20190623  
   WMXZ added changes to remove issues when both using SD.h and uSDFS.h, no need for ff_utils anymore
 * v0.85 20190623 
@@ -29,6 +38,8 @@
  *     2 rotary encoders with pushbutton
  *     2 pushbuttons
  *     SDCard
+ * 
+ *  when using a GX12 connector for the microphone: pinout 1=signal, 2=GND, 3=+V, 4=GND 
  *
 *   IMPORTANT: uses the SD card slot of the Teensy, NOT the SD card slot of the audio board
  *
@@ -135,8 +146,8 @@
 // *************************** VARS  **************************
 
 String versionStr=batversion;
-boolean EEsettingschanged=false;
 
+boolean startUp=true;
 boolean SD_ACTIVE=false;
 boolean continousPlay=false;
 boolean recorderActive=false;
@@ -303,7 +314,6 @@ AudioControlSGTL5000        sgtl5000;
 //const int myInput = AUDIO_INPUT_LINEIN;
 const int myInput = AUDIO_INPUT_MIC;
 
-//****************************************************************************************
 
 
 // **************************** TIME VARS ********************************************
@@ -413,6 +423,13 @@ int sample_rate_real = SR[sample_rate].freq_real;
 int last_sample_rate=sample_rate;
 const char * SRtext=SR[sample_rate].txt;
 
+int8_t TE_speed=20;
+int8_t TE_low=15 ;
+int8_t param=10;
+
+int preset_idx=0; //0= default values; 1=user values;
+
+
 // ***************************** FFT SETUP *******************************
 
 // setup for FFTgraph denoising
@@ -428,11 +445,16 @@ float powerspectrum_Max=0;
 int display_mode=spectrumgraph; //default display
 int8_t mic_gain = 50; // start detecting with this MIC_GAIN in dB
 int8_t volume=50;
+//int8_t TE_speed=20; // moved to EEprom section
+//int8_t TE_low=15 ; //move to EEprom section
+
 
 int freq_real = 45000; // start heterodyne detecting at this frequency
 int freq_real_backup=freq_real; //used to return to proper listening setting after using the play_function
 
 float freq_Oscillator =50000;
+
+
 
 /******************* MENU ********************************/
 /*********************************************************/
@@ -446,11 +468,16 @@ float freq_Oscillator =50000;
 #define  MENU_SPECTRUMMODE 5
 #define  MENU_TIME  6
 #define  MENU_SR    7 //sample rate
-//define  MENU_REC   8 //record
-#define  MENU_PLY   8 //play
-#define  MENU_PLD   9 //play at original rate
+#define  MENU_PRESET 8
 
-#define  MENU_MAX 9
+#define MENU_TES 9 // auto_te speed
+#define MENU_TEL 10 // auto_te lowest freq
+//define  MENU_REC   8 //record
+#define  MENU_PLY  11 //play
+#define  MENU_PLD   12 //play at original rate
+#define  MENU_PARAM 13
+
+#define  MENU_MAX 13
 
 const int Leftchoices=MENU_MAX+1; //can have any value
 const int Rightchoices=MENU_FRQ+1; //allow up to FRQ
@@ -464,11 +491,14 @@ const char* MenuEntry [Leftchoices] =
     "Spectrum",
     "SetTime",
     "SampleR",
+    "Preset",
+    "TE_Spd",
+    "TE_Low",
     //"Record",
     "Play",
     "PlayR",
+    "Param"
     
-
   };
 
 
@@ -481,7 +511,6 @@ const char* MenuEntry [Leftchoices] =
 
 //default
 int detector_mode=detector_heterodyne;
-
 
 #ifdef USESD
   #define MAX_FILES    50
@@ -522,13 +551,27 @@ void display_settings() {
     tft.fillRect(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART,240,BOTTOM_OFFSET,MENU_BCK_COLOR_PART);
 
     tft.setCursor(0,0);
-    tft.print("g:"); tft.print(mic_gain);
+    tft.print("g"); tft.print(mic_gain);
     if (display_mode==waterfallgraph)
-       {tft.print(" f:"); tft.print(int(freq_real/1000));
+       {tft.print(" f"); tft.print(int(freq_real/1000));
        }
-    tft.print(" v:"); tft.print(volume);
-    tft.print(" SR"); tft.print(SRtext);
+    tft.print(" v"); tft.print(volume);
+    tft.print(" S"); tft.print(SRtext);
+
+    
     //tft.print(" M"); tft.print(LeftButton_Mode); tft.print(LeftButton_Next);
+    if (EncLeft_menu_idx==MENU_TES)
+      { tft.print(" Ts"); 
+        tft.print(TE_speed);
+      }
+    if (EncLeft_menu_idx==MENU_TEL)
+      { tft.print(" Tl"); 
+        tft.print(TE_low);
+      }
+    if (EncLeft_menu_idx==MENU_PARAM)
+      { tft.print(" P"); 
+        tft.print(param);
+      }
     tft.setCursor(0,20);
 
     switch (detector_mode) {
@@ -590,6 +633,16 @@ void display_settings() {
           { tft.print(SR[sample_rate].txt);
           }    
        
+       if (EncLeft_menu_idx==MENU_PRESET)
+          { if (preset_idx==0) 
+                {tft.print("DEFAULT");}
+                else
+                {tft.print("USER");
+                }
+                
+          }    
+       
+
        if (EncRight_function==enc_value) 
          { tft.setTextColor(ENC_VALUE_COLOR);} //value is active
        else
@@ -763,7 +816,6 @@ void  set_sample_rate (int sr) {
   set_freq_Oscillator (freq_real);
   AudioInterrupts();
   delay(20);
-  EEsettingschanged=true;
   display_settings();
 }
 
@@ -810,16 +862,19 @@ void updatedisplay(void)
  if (myFFT.available()) {
   const uint16_t Y_OFFSET = TOP_OFFSET;
   static int count = TOP_OFFSET;
+
   // lowest frequencybin to detect as a batcall
-  int batCall_LoF_bin= int(25000/(sample_rate_real / FFT_points));
-  int batCall_HiF_bin= int(80000/(sample_rate_real / FFT_points));
+  int batCall_LoF_bin= int((TE_low*1000.0)/(sample_rate_real / FFT_points));
+  // highest frequencybin to detect as a batcall
+  int batCall_HiF_bin= int(80000.0/(sample_rate_real / FFT_points));
 
   uint8_t spec_hi=120; //default 120
   uint8_t spec_lo=2; //default 2
   uint8_t spec_width=2;
 
   uint16_t FFT_pixels[240]; // maximum of 240 pixels, each one is the result of one FFT
-  memset(FFT_pixels,0,sizeof(FFT_pixels));
+  memset(FFT_pixels,0,sizeof(FFT_pixels)); //blank the pixels
+
   FFTcount++;
   //when FFTcount==1 then clean the FFTavg array to start denoising
   if (FFTcount==1)
@@ -827,7 +882,7 @@ void updatedisplay(void)
           FFTavg[i]=0;
        }
      }
-  // collect 100 FFT samples for the denoise array
+  // collect 100 FFT samples after cleaning to setup the denoise array
   if (FFTcount<100)
      { for (int i = 2; i < 128; i++) {
          FFTavg[i]=FFTavg[i]+myFFT.output[i]*10*0.001; //0.1% of total values
@@ -835,7 +890,7 @@ void updatedisplay(void)
      }
 
     int FFT_peakF_bin=0;
-    int peak=512;
+    int peak=256;
     int avgFFTbin=0;
     // there are 128 FFT different bins only 120 are shown on the graphs
     for (int i = spec_lo; i < spec_hi; i++) {
@@ -848,19 +903,22 @@ void updatedisplay(void)
         }
       if (val<5)
            {val=5;}
-
+      
       uint8_t pixpos=(i-spec_lo)*spec_width;
       FFT_pixels[pixpos] = tft.color565(
-              min(255, val/2),
-              (val/6>255)? 255 : val/6,
-               0  );
+              min(255, val),
+              (val/3>255)? 255 : val/3,
+               val/6>255 ?255: val/6 );
       for (int j=1; j<spec_width; j++)
          { FFT_pixels[pixpos+j]=FFT_pixels[pixpos];
          }
     }
 
+
+   
     avgFFTbin=avgFFTbin/(spec_hi-spec_lo);
-    if ((peak/avgFFTbin)<1.1) //very low peakvalue so probably a lot of noise, dont detect this as a peak
+
+    if ((peak/avgFFTbin)<1.05) //very low peakvalue so probably a lot of noise, dont detect this as a peak
      { FFT_peakF_bin=0;
      }
 
@@ -962,16 +1020,17 @@ void updatedisplay(void)
           
        }
 
+    int milliGap=param*10;
+    
+    /*************************  SIGNAL DETECTION ***********************/
     //signal detected in the detection range
     if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin)) 
       {
         // check if it is a new discovered signal in the detection range
         if (not Ultrasound_detected)
-          { started_detection=0; //start of the call mark
+          { started_detection=0; //start timing of the call length
             //clicker=0;
-            FFT_pixels[5]=ENC_VALUE_COLOR; // mark the start on the screen
-            FFT_pixels[6]=ENC_VALUE_COLOR;
-            FFT_pixels[7]=ENC_VALUE_COLOR;
+           
 
             if (detector_mode==detector_Auto_heterodyne)
                if (since_heterodyne>1000) //update the most every second
@@ -981,35 +1040,44 @@ void updatedisplay(void)
                  //granular1.stop();
                 }
 
-            //restart the TimeExpansion only if the previous call was played
+            //restart the TimeExpansion only if the previous call was completely played
             if ((detector_mode==detector_Auto_TE) and (TE_ready) )
              { granular1.stop();
                granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
-               granular1.setSpeed(0.05);
+               granular1.setSpeed(1.0/TE_speed);
                TE_ready=false;
              }
-          }
-         //clicker++;
-         Ultrasound_detected=true;
+          } /* end ultrasound detected */
+
+        // what if the ultrasound comes in nearly continously ...we than need to stop the play automatically !
+        // if after 80ms after detecting we still have ultrasound coming we need to trigger a new detection
+
+        //clicker++;
+        Ultrasound_detected=true; 
+        
      }
-   else // we allready have detected a signal in the detection range
+   else // in the last sample there is no peak in the detection range
         {
           if (Ultrasound_detected) //previous sample was still a call
            { callLength=started_detection; // got a pause so store the time since the start of the call
              end_detection=0; //start timing the length of the replay
              }
+
           Ultrasound_detected=false; // set the end of the call
         }
+
+
     // restart TimeExpansion recording a bit after the call has finished completely
-    if ((!TE_ready) and (started_detection>(80)))
+    if ((!TE_ready) and (started_detection>(milliGap)))
       { //stop the time expansion
         TE_ready=true;
+        Ultrasound_detected=false; // allow a new signal to be processed
         granular1.stopTimeExpansion();
       }
 
    if (display_mode==waterfallgraph)
    {
-     if (end_detection<50) //keep scrolling 50ms after the last bat-call
+     if (end_detection<50) //keep scrolling the screen until 50ms after the last bat-call
       { //if (TE_ready) //not playing TE
         { tft.writeRect( 0,count, ILI9341_TFTWIDTH,1, (uint16_t*) &FFT_pixels); //show a line with spectrumdata
           tft.setScroll(count);
@@ -1103,7 +1171,7 @@ char filename[80];
       
     rc = f_chdrive(Device);
     #ifdef DEBUGSERIAL
-      if((rc) die("chdrive",rc);
+      if((rc)) die("chdrive",rc);
    #endif
   }
 
@@ -1390,6 +1458,204 @@ void continuePlaying() {
 }
 
 
+
+
+//*******************************EEPROM *********************************************************
+// routines copied and adapted from https://github.com/DD4WH/Teensy-ConvolutionSDR/blob/master/Teensy_Convolution_SDR.ino
+
+#include <EEPROM.h>
+#include <util/crc16.h>
+
+#define EE_CONFIG_VERSION "0000"  //4 char ID of the EE structure
+#define EE_CONFIG_START 0    
+//general variables stored in EEprom
+
+
+char versionEE[4];
+
+struct config_t {
+  unsigned char BatVersion; 
+  int detector_mode;
+  int display_mode;
+  int play_rate;
+  int sample_rate;
+  int8_t mic_gain;
+  int8_t volume;
+  int freq_real;
+  int8_t TE_speed;
+  int8_t TE_low;
+  int preset_idx; //0= default values; 1=user values;
+
+  char version_of_settings[4]; //versionstring to track changes in the EEstructure
+  uint16_t crc;   // added when saving
+} E;
+
+
+boolean loadFromEEPROM(struct config_t *ls) {  //mdrhere
+#if defined(EEPROM_h)
+  char this_version[] = EE_CONFIG_VERSION;
+  unsigned char thechar = 0;
+  uint8_t thecrc = 0;
+  config_t ts, *ts_ptr;  //temp struct and ptr to hold the data
+  ts_ptr = &ts;
+
+  // To make sure there are settings, and they are YOURS! Load the settings and do the crc check first
+  for (unsigned int t = 0; t < (sizeof(config_t) - 1); t++) {
+    thechar = EEPROM.read(EE_CONFIG_START + t);
+    *((char*)ts_ptr + t) = thechar;
+    thecrc = _crc_ibutton_update(thecrc, thechar);
+  }
+  if (thecrc == 0) { // have valid data
+    //printConfig_t(ts_ptr);
+    #ifdef DEBUGSERIAL
+      Serial.printf("Found EEPROM version %s", ts_ptr->version_of_settings);  //line continued after version
+    #endif
+    if (ts.version_of_settings[3] == this_version[3] &&    // If the latest version
+        ts.version_of_settings[2] == this_version[2] &&
+        ts.version_of_settings[1] == this_version[1] &&
+        ts.version_of_settings[0] == this_version[0] ) {
+      for (int i = 0; i < (int)sizeof(config_t); i++) { //copy data to location passed in
+        *((unsigned char*)ls + i) = *((unsigned char*)ts_ptr + i);
+      }
+      #ifdef DEBUGSERIAL
+      Serial.println(", loaded");
+      #endif
+
+      return true;
+    } else { // settings are old version
+      #ifdef DEBUGSERIAL
+      Serial.printf(", not loaded, current version is %s\n", this_version);
+      #endif
+      return false;
+    }
+  } else {
+    #ifdef DEBUGSERIAL
+    Serial.println("Bad CRC, settings not loaded");
+    #endif
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+boolean saveInEEPROM(struct config_t *pd) {
+#if defined(EEPROM_h)
+  int byteswritten = 0;
+  uint8_t thecrc = 0;
+  boolean errors = false;
+  unsigned int t;
+  for (t = 0; t < (sizeof(config_t) - 2); t++) { // writes to EEPROM
+    thecrc = _crc_ibutton_update(thecrc, *((unsigned char*)pd + t) );
+    if ( EEPROM.read(EE_CONFIG_START + t) != *((unsigned char*)pd + t) ) { //only if changed
+      EEPROM.write(EE_CONFIG_START + t, *((unsigned char*)pd + t));
+      // and verifies the data
+      if (EEPROM.read(EE_CONFIG_START + t) != *((unsigned char*)pd + t))
+      {
+        errors = true; //error writing (or reading) exit
+        break;
+      } else {
+        //Serial.print("EEPROM ");Serial.println(t);
+        byteswritten += 1; //for debuggin
+      }
+    }
+  }
+  EEPROM.write(EE_CONFIG_START + t, thecrc);   //write the crc to the end of the data
+  if (EEPROM.read(EE_CONFIG_START + t) != thecrc)  //and check it
+    errors = true;
+  if (errors == true) {
+    #ifdef DEBUGSERIAL
+    Serial.println(" error writing to EEPROM");
+    #endif
+  } else {
+    #ifdef DEBUGSERIAL
+    Serial.printf("%d bytes saved to EEPROM version %s \n", byteswritten, EE_CONFIG_VERSION);  //note: only changed written
+    #endif
+  }
+  return errors;
+#else
+  return false;
+#endif
+}
+
+boolean EEPROM_LOAD() { 
+  config_t E;
+  if (loadFromEEPROM(&E) == true) {
+    #ifdef DEBUGSERIAL
+      Serial.print("BatV ");
+      Serial.println(E.BatVersion);
+      Serial.print("Preset ");
+      Serial.println(E.preset_idx);
+      Serial.print("detector ");
+      Serial.println(E.detector_mode);
+      Serial.print("display ");
+      Serial.println(E.display_mode);
+      Serial.print("sampleR ");
+      Serial.println(E.sample_rate);
+      Serial.print("mic_gain ");
+      Serial.println(E.mic_gain);
+      Serial.print("volume ");
+      Serial.println(E.volume);
+      Serial.print("TE_SPEED ");
+      Serial.println(E.TE_speed);
+      Serial.print("TE_low ");
+      Serial.println(E.TE_low);
+      
+    #endif
+
+    for (int i = 0; i < 4; i++)
+        versionEE[i]= E.version_of_settings[i];
+    
+    if (E.preset_idx==1) //user has set preset_idx to default to usersettings
+      {
+        
+        play_rate=E.play_rate; //replay speed
+        sample_rate=E.sample_rate; //sample rate 
+        preset_idx=E.preset_idx; // default or user settings at startup
+        detector_mode=E.detector_mode; // detector mode
+        display_mode=E.display_mode;
+        TE_speed=E.TE_speed; //replay speed for TE
+        TE_low=E.TE_low; //low frequency for TE
+        freq_real=E.freq_real; // set centre frequency
+        volume=E.volume;
+        mic_gain=E.mic_gain;
+      }
+
+    return true;
+    }
+    else
+    {
+      return false; // crc was wrong so probably a changed setup of the EE structure
+    }
+    
+}   
+
+void EEPROM_SAVE() {
+  config_t E;
+  E.BatVersion = versionno;
+  E.play_rate=play_rate;
+  E.sample_rate=sample_rate;
+  E.preset_idx=preset_idx;
+  E.detector_mode=detector_mode;
+  E.display_mode=display_mode;
+  E.TE_low=TE_low;
+  E.TE_speed=TE_speed;
+  E.freq_real=freq_real;
+  E.volume=volume;
+  E.mic_gain=mic_gain;
+
+  E.crc = 0; //will be overwritten
+  //printConfig_t(&E);  //for debugging
+  char theversion[] = EE_CONFIG_VERSION;
+  for (int i = 0; i < 4; i++)
+    E.version_of_settings[i] = theversion[i];
+  saveInEEPROM(&E);
+} // end void eeProm SAVE
+
+
+
+
+
 // ******************************************************* MODES *****************************
 void defaultMenuPosition()
 {EncLeft_menu_idx=MENU_VOL;
@@ -1414,6 +1680,11 @@ void setMixer(int mode)
 //  ********************************************* MAIN MODE CHANGE ROUTINE *************************
 void changeDetector_mode()
 {
+  #ifdef DEBUGSERIAL
+    Serial.print("Changedetector ");
+
+    Serial.println(detector_mode);
+  #endif    
   if (detector_mode==detector_heterodyne)
          { granular1.stop(); //stop other detecting routines
            setMixer(heterodynemixer);
@@ -1424,7 +1695,7 @@ void changeDetector_mode()
            EncRight_function=enc_value;
          }
   if (detector_mode==detector_divider)
-         {  granular1.beginDivider(GRANULAR_MEMORY_SIZE);
+         { granular1.beginDivider(GRANULAR_MEMORY_SIZE);
            setMixer(granularmixer);
            defaultMenuPosition();
          }
@@ -1432,7 +1703,7 @@ void changeDetector_mode()
   if (detector_mode==detector_Auto_TE)
          {  granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
            setMixer(granularmixer);
-           granular1.setSpeed(0.05); //default TE is 1/0.06 ~ 1/16 :TODO, switch from 1/x floats to divider value x
+           granular1.setSpeed(1.0/TE_speed); //default TE is 1/0.06 ~ 1/16 :TODO, switch from 1/x floats to divider value x
            defaultMenuPosition();
        }
   if (detector_mode==detector_Auto_heterodyne)
@@ -1520,6 +1791,31 @@ void updateEncoder(uint8_t Encoderside )
           sgtl5000.volume(V);
           AudioInterrupts();
         }
+     /******************************AUTO TE SPEED  ***************/
+        if (menu_idx==MENU_TES)
+        { TE_speed+=change;
+          TE_speed=constrain(TE_speed,5,30);
+          
+        }
+     /******************************AUTO TE LOWDETECT  ***************/
+        if (menu_idx==MENU_TEL)
+        { TE_low+=change;
+          TE_low=constrain(TE_low,15,35);
+        
+        }
+      /******************************AUTO TE LOWDETECT  ***************/
+        if (menu_idx==MENU_PARAM)
+        { param+=change;
+          param=constrain(param,1,35);
+        
+        }  
+      /****************************** PRESET  ****************/
+      /* save all current settings as the default for startup */
+      if (menu_idx==MENU_PRESET)
+      {
+
+      }
+      
       /******************************MIC_GAIN  ***************/
       if (menu_idx==MENU_MIC)
         {
@@ -1605,6 +1901,11 @@ void updateEncoder(uint8_t Encoderside )
           set_sample_rate(sample_rate);
         }
 
+       if ((EncLeft_menu_idx==MENU_PRESET) and (EncLeft_function==enc_value))  //only selects a possible sample_rate, user needs to press a button to SET sample_rate
+        { preset_idx+=EncLeftchange;
+          preset_idx=preset_idx%2;
+        }
+
 
       /******************************SELECT A FILE  ***************/
       if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value))//menu selected file to be played
@@ -1685,26 +1986,38 @@ void updateButtons()
  else // ************** NORMAL BUTTON PROCESSING
 
   {
-    encoderButton_L.update();
-    encoderButton_R.update();
-
-    micropushButton_L.update();
-    micropushButton_R.update();
-
+    
+ encoderButton_L.update();
+ encoderButton_R.update();
+ micropushButton_L.update();
+ micropushButton_R.update();
+   
   //rightbutton is completely dedicated to detectormode
    if (micropushButton_R.risingEdge()) {
-        EEsettingschanged=true;
-        detector_mode++;
-        if (detector_mode>detector_passive)
-          {detector_mode=0;}
-        changeDetector_mode();
-        display_settings();
+         #ifdef DEBUGSERIAL
+              Serial.println("micropushR ");
+          #endif
+        if (startUp==false)  // micropush generates a risingEdge direct after startup !!
+         {detector_mode++;
+          if (detector_mode>detector_passive)
+            {detector_mode=0;}
+
+          changeDetector_mode();
+          display_settings();
+         }
+         else
+         {
+           startUp=false;
+         }
+         
     }
    //leftbutton function is based on leftbutton_mode)
     if (micropushButton_L.risingEdge()) {
+          #ifdef DEBUGSERIAL
+              Serial.println("micropushL ");
+          #endif
         if (LeftButton_Mode==MODE_DISPLAY) 
           {
-           EEsettingschanged=true;
            display_mode+=1;
            display_mode=display_mode%3; //limit to 0(none),1(spectrum),2(waterfall)
            if (display_mode==waterfallgraph)
@@ -1755,6 +2068,11 @@ void updateButtons()
           {LeftButton_Mode=LeftButton_Next; //select the choosen function for the leftbutton
           }
 
+      if ((EncLeft_menu_idx==MENU_PRESET))
+          { EEPROM_SAVE(); //update preferred settings in EEprom
+
+          }    
+
      if (SD_ACTIVE)
      {
        //play menu got choosen, make sure the LeftButton now also switched to Play mode
@@ -1796,42 +2114,6 @@ void updateButtons()
 // **************************  END BUTTONS
 
 
-//***********************************************  PRESET STRUCTURES *********************************************
-
-typedef struct {
-	uint8_t display_mode;
-  uint8_t detector_mode;
-  uint8_t volume;
-  uint8_t mic_gain;
-  uint8_t sample_rate;
-  uint8_t play_rate;
-  uint8_t EEversion;
-  
-} EEsettings;
-
-EEsettings Batsettings;
-
-const EEsettings Batsettings_default =
-{ waterfallgraph, 
-  detector_Auto_heterodyne,
-  50,
-  50,
-  SAMPLE_RATE_281K,
-  SAMPLE_RATE_22K,
-  1,  //version
-};
-
-
-byte EEversion=1; //versioning will allow future changes to the saved structure to be handled
-
-void SD_LOAD() {
-   Batsettings=Batsettings_default;
-   
-}
-
-void SD_SAVE() {
-  
-} 
 
 //###########################################################################
 //###########################################################################
@@ -1842,9 +2124,9 @@ void SD_SAVE() {
 void setup() {
  #ifdef DEBUGSERIAL
   Serial.begin(9800);
+  delay(5000); //wait 10 seconds 
  #endif
   delay(200);
-
 //setup Encoder Buttonpins with pullups
 
   pinMode(encoderButton_RIGHT,INPUT_PULLUP);
@@ -1874,6 +2156,16 @@ void setup() {
   sgtl5000.lineInLevel(0);
   mixFFT.gain(0,1);
 
+
+  
+/* EEPROM CHECK  */
+ if (EEPROM_LOAD()==false) //load data fromEEprom, if it returns false than save data"
+   {
+     EEPROM_SAVE();
+   }
+    
+
+
 // Init TFT display
 #ifdef USETFT
   tft.begin();
@@ -1890,6 +2182,9 @@ void setup() {
   tft.print("Teensy Batdetector");
   tft.setCursor(20,120);
   tft.print(versionStr);
+  tft.setCursor(20,150);
+  tft.print("EEprom ");
+  tft.print(String(versionEE));
   
   delay(5000); //wait  seconds to clearly show the time
 
@@ -1897,6 +2192,12 @@ void setup() {
   tft.setScrollarea(TOP_OFFSET,BOTTOM_OFFSET);
   
   display_settings();
+
+  if (display_mode==spectrumgraph)
+             {  tft.setScroll(0);
+                tft.setRotation( 0 );
+              }
+
 #endif
 
 //Init SD card use
@@ -1940,6 +2241,12 @@ granular1.begin(granularMemory, GRANULAR_MEMORY_SIZE);
 for (int16_t i = 0; i < 128; i++) {
   FFTavg[i]=0;
     }
+
+//switch to the preset or default detector_mode
+changeDetector_mode();
+
+
+    
 } // END SETUP
 
 //************************************************************************         LOOP         ******************
@@ -1977,8 +2284,7 @@ void loop()
     snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
     tft.print(tstr);
     old_time_min=tx.tm_min;
-  
-  
+    
 
   }
 
