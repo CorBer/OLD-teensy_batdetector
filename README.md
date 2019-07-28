@@ -3,6 +3,12 @@ Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
+
+<b>0.89</b><br> indicator for low-high detectionrange in graph for AUTO_TE <br>
+        menu updated and more uniform (all choosen values shown in white next to menusetting also for TE_LOW/TE_SPD) <br>
+        added counter to keep track of EEprom saving (still reset to 0 for each EEprom version)<br>
+        added text to display after pressing PRESET USER to save to EEprom<br>
+
 <b>0.88</b><br>(source and hex)<br>
 -EEprom saving added (initial test)<br>
 -Menu expanded with <br>
