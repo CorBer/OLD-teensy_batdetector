@@ -7,10 +7,17 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.88 20190718"
-#define versionno 88 // used in EEProm storage
+#define batversion "v0.89 20190728"
+#define versionno 89 // used in EEProm storage
+
 /* changes  
-* v0.88 EEprom setup done
+* v0.89 indicator for low-high detectionrange in graph for AUTO_TE
+        menu updated and more uniform (all choosen values shown in white next to menusetting also for TE_LOW/TE_SPD)
+        added counter to keep track of EEprom saving (still reset to 0 for each EEprom version)
+        added text to display after pressing PRESET USER to save to EEprom
+        
+* v0.88 EEprom setup added
+        
 
 * v0.87 allow to set low-detection frequency for auto_te via MENU TE_LOW
         allow the auto_te divider to be set via MENU TE_SPEED
@@ -423,12 +430,12 @@ int sample_rate_real = SR[sample_rate].freq_real;
 int last_sample_rate=sample_rate;
 const char * SRtext=SR[sample_rate].txt;
 
+int16_t EEsaved_count=0;
 int8_t TE_speed=20;
 int8_t TE_low=15 ;
 int8_t param=10;
 
 int preset_idx=0; //0= default values; 1=user values;
-
 
 // ***************************** FFT SETUP *******************************
 
@@ -560,18 +567,7 @@ void display_settings() {
 
     
     //tft.print(" M"); tft.print(LeftButton_Mode); tft.print(LeftButton_Next);
-    if (EncLeft_menu_idx==MENU_TES)
-      { tft.print(" Ts"); 
-        tft.print(TE_speed);
-      }
-    if (EncLeft_menu_idx==MENU_TEL)
-      { tft.print(" Tl"); 
-        tft.print(TE_low);
-      }
-    if (EncLeft_menu_idx==MENU_PARAM)
-      { tft.print(" P"); 
-        tft.print(param);
-      }
+   
     tft.setCursor(0,20);
 
     switch (detector_mode) {
@@ -629,10 +625,34 @@ void display_settings() {
                tft.print(" ");
        }
        
+       tft.setTextColor(COLOR_WHITE);
+
+       if (EncLeft_menu_idx==MENU_MIC)
+          { tft.print(mic_gain);
+          } 
+
+       if (EncLeft_menu_idx==MENU_FRQ)
+          { tft.print(freq_real);
+          } 
+       if (EncLeft_menu_idx==MENU_VOL)
+          { tft.print(volume);
+          }
+
+       if (EncLeft_menu_idx==MENU_TEL)
+          { tft.print(TE_low);
+          } 
+
+       if (EncLeft_menu_idx==MENU_TES)
+          { tft.print(TE_speed);
+          } 
+
        if (EncLeft_menu_idx==MENU_SR)
           { tft.print(SR[sample_rate].txt);
           }    
-       
+       if (EncLeft_menu_idx==MENU_PARAM)
+          { tft.print(param);
+          } 
+
        if (EncLeft_menu_idx==MENU_PRESET)
           { if (preset_idx==0) 
                 {tft.print("DEFAULT");}
@@ -710,11 +730,21 @@ void display_settings() {
     if (display_mode>0)
       { float x_factor=10000/(0.5*(sample_rate_real / FFT_points));
         int curF=2*int(freq_real/(sample_rate_real / FFT_points));
+        
         int maxScale=int(sample_rate_real/20000);
         for (int i=1; i<maxScale; i++)
         { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
         }
+        // detection range
+        int curLo=int(TE_low*1000/(sample_rate_real / FFT_points));
+        int curHi=int(80000/(sample_rate_real / FFT_points));
+        if (detector_mode==detector_Auto_TE) //show detection band
+          { tft.drawFastHLine(2*curLo,TOP_OFFSET-SPECTRUMSCALE,2*(curHi-curLo),COLOR_WHITE);
+            tft.drawFastHLine(2*curLo,TOP_OFFSET-1,2*(curHi-curLo),COLOR_WHITE);
+          }
         tft.fillCircle(curF,TOP_OFFSET-3,3,ENC_MENU_COLOR);
+        
+        
         if (display_mode==spectrumgraph)
           { //tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
             char tstr[9];
@@ -906,9 +936,10 @@ void updatedisplay(void)
       
       uint8_t pixpos=(i-spec_lo)*spec_width;
       FFT_pixels[pixpos] = tft.color565(
-              min(255, val),
-              (val/3>255)? 255 : val/3,
-               val/6>255 ?255: val/6 );
+               min(255, val*2), //very low values will show as red
+              (val/3>255)? 255 : val/3, // up to 3*255 will be coloured a mix of red/green (yellow) 
+               val/9>255 ?255: val/9 ); // uo to 9*255 will be coloured a mix of red/green/blue (white)
+
       for (int j=1; j<spec_width; j++)
          { FFT_pixels[pixpos+j]=FFT_pixels[pixpos];
          }
@@ -1020,7 +1051,7 @@ void updatedisplay(void)
           
        }
 
-    int milliGap=param*10;
+    uint16_t milliGap=param*10;
     
     /*************************  SIGNAL DETECTION ***********************/
     //signal detected in the detection range
@@ -1461,20 +1492,20 @@ void continuePlaying() {
 
 
 //*******************************EEPROM *********************************************************
-// routines copied and adapted from https://github.com/DD4WH/Teensy-ConvolutionSDR/blob/master/Teensy_Convolution_SDR.ino
+// original routines copied from https://github.com/DD4WH/Teensy-ConvolutionSDR/blob/master/Teensy_Convolution_SDR.ino
 
 #include <EEPROM.h>
 #include <util/crc16.h>
 
-#define EE_CONFIG_VERSION "0000"  //4 char ID of the EE structure
+#define EE_CONFIG_VERSION "0001"  //4 char ID of the EE structure, will change with each change in EEprom structure
 #define EE_CONFIG_START 0    
 //general variables stored in EEprom
 
-
-char versionEE[4];
+char versionEE[5];
 
 struct config_t {
   unsigned char BatVersion; 
+  uint16_t EEsaved_count;
   int detector_mode;
   int display_mode;
   int play_rate;
@@ -1538,7 +1569,7 @@ boolean loadFromEEPROM(struct config_t *ls) {  //mdrhere
   return false;
 #endif
 }
-
+//routine to save data to EEprom but only those bytes that need to be saved, to conserve EEprom
 boolean saveInEEPROM(struct config_t *pd) {
 #if defined(EEPROM_h)
   int byteswritten = 0;
@@ -1602,6 +1633,7 @@ boolean EEPROM_LOAD() {
       Serial.println(E.TE_low);
       
     #endif
+    EEsaved_count=E.EEsaved_count;
 
     for (int i = 0; i < 4; i++)
         versionEE[i]= E.version_of_settings[i];
@@ -1632,6 +1664,7 @@ boolean EEPROM_LOAD() {
 
 void EEPROM_SAVE() {
   config_t E;
+  E.EEsaved_count=EEsaved_count+1; //increase the save counter
   E.BatVersion = versionno;
   E.play_rate=play_rate;
   E.sample_rate=sample_rate;
@@ -1651,8 +1684,6 @@ void EEPROM_SAVE() {
     E.version_of_settings[i] = theversion[i];
   saveInEEPROM(&E);
 } // end void eeProm SAVE
-
-
 
 
 
@@ -2070,7 +2101,8 @@ void updateButtons()
 
       if ((EncLeft_menu_idx==MENU_PRESET))
           { EEPROM_SAVE(); //update preferred settings in EEprom
-
+            tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-20);
+            tft.println("EEprom SAVED");
           }    
 
      if (SD_ACTIVE)
@@ -2159,7 +2191,7 @@ void setup() {
 
   
 /* EEPROM CHECK  */
- if (EEPROM_LOAD()==false) //load data fromEEprom, if it returns false than save data"
+ if (EEPROM_LOAD()==false) //load data fromEEprom, if it returns false (probably due to a change in structure) than start by saving default data"
    {
      EEPROM_SAVE();
    }
@@ -2181,10 +2213,14 @@ void setup() {
   tft.setCursor(0,90);
   tft.print("Teensy Batdetector");
   tft.setCursor(20,120);
-  tft.print(versionStr);
-  tft.setCursor(20,150);
-  tft.print("EEprom ");
-  tft.print(String(versionEE));
+  tft.println(versionStr);
+  tft.println();
+  tft.print("EEprom v");
+  snprintf(tstr,9,"%s",versionEE);
+  //tft.println(String(versionEE));
+  tft.println(tstr);
+  tft.print("EEprom #");
+  tft.println(EEsaved_count);
   
   delay(5000); //wait  seconds to clearly show the time
 
