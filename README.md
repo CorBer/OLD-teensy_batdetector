@@ -3,7 +3,7 @@ Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
-
+<p style="color:red">
 <font-color><b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine ! NOT SOLVED YET</b> 
 
 
