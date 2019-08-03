@@ -4,7 +4,7 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
 
-<font-color:red><b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine ! NOT SOLVED YET</b> 
+<font-color><b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine ! NOT SOLVED YET</b> 
 
 
 <b>0.89</b><br> 
