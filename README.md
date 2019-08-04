@@ -6,6 +6,8 @@ latest changes<br>
 
 <b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine ! NOT SOLVED YET</b> 
 
+<b>0.91</b><br> CURRENTLY TESTING
+-this hopefully solves the issues with replay of recorded files that were present since v0.84 
 
 <b>0.89</b><br> 
 - eeprom version 0001
