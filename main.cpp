@@ -7,10 +7,30 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.89 20190728"
-#define versionno 89 // used in EEProm storage
+#define batversion "v0.91 20190804"
+#define versionno 91 // used in EEProm storage
+
+// ***************************** GLOBAL DEFINES
+//#define DEBUGSERIAL
+
+//USE a TFT (code will not function properly without !!! )
+#define USETFT
+//SD1 uses default SDcard Fat, TODO !! SD2 uses faster SDIO library
+
+#define USESD
+#define USESD1
+
+#define USERECORD //allows to remove recording section from software (needed for testing )
+#define USEEEPROM //allows to remove EEprom section (needed for testing)
+
 
 /* changes  
+* v0.91 IMPORTANT :solved the issues with replay that were present since v0.86
+
+* v0.90 added define to allow encoder reversal (some encoders work counter-clockwise) 
+        menu cleaned (removed spectrum, was not active. changed sequence of menu)
+        maximum filecount 99 allowed to save from now on
+
 * v0.89 indicator for low-high detectionrange in graph for AUTO_TE
         menu updated and more uniform (all choosen values shown in white next to menusetting also for TE_LOW/TE_SPD)
         added counter to keep track of EEprom saving (still reset to 0 for each EEprom version)
@@ -26,15 +46,12 @@
   WMXZ added changes to remove issues when both using SD.h and uSDFS.h, no need for ff_utils anymore
 * v0.85 20190623 
   added ff_utils.h and ff_utils.c (ff_utils_copy) to the main structure to remove depences from uSDFS 
-  changed seconds2tm function into seconds2time
+  changed seconds2time function into seconds2time
 */
 
 /***********************************************************************
  *  TEENSY 3.6 BAT DETECTOR 
  *  Copyright (c) 2019, Cor Berrevoets, registax@gmail.com
- *
- *  TODO: use selectable presets
- *
  *
  *  HARDWARE USED:
  *     TEENSY 3.6
@@ -54,6 +71,7 @@
  *                       Frequency divider
  *                       Automatic heterodyne (1/10 implemented)
  *                       Automatic TimeExpansion (live)
+ *                       Passive (no processing)
  *
  *  Sample rates up to 352k
  *
@@ -134,14 +152,7 @@
 
 */
 
-// ***************************** GLOBAL DEFINES
-//#define DEBUGSERIAL
 
-//USE a TFT (code will not function properly without !!! )
-#define USETFT
-//SD1 uses default SDcard Fat, TODO !! SD2 uses faster SDIO library
-#define USESD
-#define USESD1
 
 // *************************** LIBRARIES **************************
 
@@ -150,6 +161,7 @@
 #include <SPI.h>
 #include <Bounce.h>
 
+#include "sec2time.h" // separate time routine library
 // *************************** VARS  **************************
 
 String versionStr=batversion;
@@ -162,25 +174,31 @@ boolean playActive=false;
 boolean Ultrasound_detected=false;//triggers when an ultrasonic signalpeak is found during FFT
 boolean TE_ready=true; //when a TEcall is played this signals the end of the call
 
+// ****************************************************  FILE SYSTEMS
+
+int filecounter=0;
+char filename[80];
+
+
 // ************************************  TIME *****************************
 time_t getTeensy3Time()
 {  return Teensy3Clock.get();
 }
 
-typedef struct tm // explicit defined as TimeLib does not allow include of <time.h>
-{
-  int tm_sec;
-  int tm_min;
-  int tm_hour;
-  int tm_mday;
-  int tm_mon;
-  int tm_year;
-  int tm_wday;
-  int tm_yday;
-  int tm_isdst;
-} tm_t;
+// typedef struct tm // explicit defined as TimeLib does not allow include of <time.h>
+// {
+//   int tm_sec;
+//   int tm_min;
+//   int tm_hour;
+//   int tm_mday;
+//   int tm_mon;
+//   int tm_year;
+//   int tm_wday;
+//   int tm_yday;
+//   int tm_isdst;
+// } tm_t;
 
-extern "C" struct tm seconds2tm(uint32_t tt);
+// extern "C" struct tm seconds2time(uint32_t tt);
 
 int helpmin; // definitions for time and date adjust - Menu
 int helphour;
@@ -246,6 +264,7 @@ const int8_t    MODE_DETECT = 5; // default right
 
 #include <Encoder.h>
 //try to avoid interrupts as they can (possibly ?) interfere during recording
+
 #define ENCODER_DO_NOT_USE_INTERRUPTS
 
 #define MICROPUSH_RIGHT  37
@@ -270,10 +289,13 @@ const int8_t enc_value=1; //changing encoder sets value for a menuchoice
 
 const int8_t enc_leftside=0; //encoder
 const int8_t enc_rightside=1; //encoder
+// ENCODER TURN 1 (clockwise). Use ENCODER_TURN -1 for counter-clockwise
+#define ENCODER_TURN 1
 
-const int8_t enc_up=1; //encoder goes up
+const int8_t enc_up=1*ENCODER_TURN; //encoder goes up
 const int8_t enc_nc=0;
-const int8_t enc_dn=-1; //encoder goes down
+const int8_t enc_dn=-1*ENCODER_TURN; //encoder goes down
+
 
 int EncLeft_menu_idx=0;
 int EncRight_menu_idx=0;
@@ -320,7 +342,6 @@ AudioControlSGTL5000        sgtl5000;
 
 //const int myInput = AUDIO_INPUT_LINEIN;
 const int myInput = AUDIO_INPUT_MIC;
-
 
 
 // **************************** TIME VARS ********************************************
@@ -470,35 +491,32 @@ float freq_Oscillator =50000;
 #define  MENU_VOL   0 //volume
 #define  MENU_MIC   1 //mic_gain
 #define  MENU_FRQ   2 //frequency
-#define  MENU_BUTTONL   3 //set function for buttonL
+#define  MENU_SR    3 //sample rate
 #define  MENU_DNS   4 //denoise
-#define  MENU_SPECTRUMMODE 5
-#define  MENU_TIME  6
-#define  MENU_SR    7 //sample rate
-#define  MENU_PRESET 8
+#define  MENU_PRESET 5
+#define  MENU_BUTTONL   6 //set function for buttonL
+#define  MENU_TIME  7
 
-#define MENU_TES 9 // auto_te speed
-#define MENU_TEL 10 // auto_te lowest freq
-//define  MENU_REC   8 //record
-#define  MENU_PLY  11 //play
-#define  MENU_PLD   12 //play at original rate
-#define  MENU_PARAM 13
+#define MENU_TES 8 // auto_te speed
+#define MENU_TEL 9 // auto_te lowest freq
+#define  MENU_PLY  10 //play
+#define  MENU_PLD   11 //play at original rate
+#define  MENU_PARAM 12
 
-#define  MENU_MAX 13
+#define  MENU_MAX 12
 
 const int Leftchoices=MENU_MAX+1; //can have any value
 const int Rightchoices=MENU_FRQ+1; //allow up to FRQ
 const char* MenuEntry [Leftchoices] =
   {
-    "Volume",
+    "Vol.",
     "Gain",
-    "Frequency",
-    "ButtonL",
-    "Denoise",
-    "Spectrum",
-    "SetTime",
+    "Freq.",
     "SampleR",
+    "Denoise",
     "Preset",
+    "ButtonL",
+    "SetTime",
     "TE_Spd",
     "TE_Low",
     //"Record",
@@ -522,12 +540,13 @@ int detector_mode=detector_heterodyne;
 #ifdef USESD
   #define MAX_FILES    50
   #define MAX_FILE_LENGTH  13   // 8 chars plus 4 for.RAW plus NULL
-  char filelist[ MAX_FILES ][ MAX_FILE_LENGTH ];
+  char filelist[ MAX_FILES ][ MAX_FILE_LENGTH];
   int fileselect=0;
   int referencefile=0;
 #endif
 // ******************************************** DISPLAY
 
+// ************** //
 int calc_menu_dxoffset(const char* str)  // to position the menu on the right screenedge
 {
 #ifdef USETFT
@@ -539,7 +558,7 @@ int calc_menu_dxoffset(const char* str)  // to position the menu on the right sc
 #endif
   
 }
-
+// ************** //
 void display_settings() {
   #ifdef USETFT
 
@@ -590,13 +609,11 @@ void display_settings() {
         tft.print("error");
      }
 
-     #if defined USESD
-      struct tm tx = seconds2tm(RTC_TSR);
+      struct tm tx = seconds2time(RTC_TSR);
       tft.setCursor(180,20);
       char tstr[9];
       snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
       tft.print(tstr);
-     #endif
      
      /****************** SHOW ENCODER/BUTTON SETTING ***********************/
      
@@ -661,7 +678,9 @@ void display_settings() {
                 }
                 
           }    
-       
+       if (EncLeft_menu_idx==MENU_PLY)
+          { tft.print(filecounter);
+          }
 
        if (EncRight_function==enc_value) 
          { tft.setTextColor(ENC_VALUE_COLOR);} //value is active
@@ -1051,7 +1070,7 @@ void updatedisplay(void)
           
        }
 
-    uint16_t milliGap=param*10;
+    uint16_t milliGap=50; //param*10;
     
     /*************************  SIGNAL DETECTION ***********************/
     //signal detected in the detection range
@@ -1120,13 +1139,12 @@ void updatedisplay(void)
   }
 #endif
 }
-// ****************************************************  FILE SYSTEMS
-
-int filecounter=0;
-char filename[80];
 
 
 // ************************************  SD *****************************
+
+
+
 #ifdef USESD // Used for playback
   #include <SD.h>
   File root;
@@ -1137,7 +1155,7 @@ char filename[80];
 //    int fileselect=0;
 //    int referencefile=0;
 
-
+// ************** //
   void countRAWfiles(void)
   {
       filecounter=0;
@@ -1153,15 +1171,20 @@ char filename[80];
           }
           else   {
           String fname=entry.name();
-          if (fname.indexOf(".RAW"))
+          if (fname.indexOf(".raw"))
             {strcpy(filelist[filecounter],entry.name() );
+             //tft.println(entry.name());
+             #ifdef DEBUGSERIAL
+              Serial.println(filelist[filecounter]);
+            #endif
             filecounter++;
             }
           }
           entry.close();
         }
+        delay(5000);
   }
-
+// ************** //
   int initSD(void)
   {
      return SD.begin(BUILTIN_SDCARD); 
@@ -1172,8 +1195,15 @@ char filename[80];
   void countRAWfiles(void) {}
 #endif
 
+
+
+
+
+#ifdef USERECORD
+
 #ifdef USESD1  //uSDFS used for recording (edit uSDFS/utility/sd_config.h)
-  #include "uSDFS.h"       // uSDFS lib
+  #include "uSDFS.h"       // uSDFS lib  - do not uSDFS master !!
+  
   FRESULT rc;        /* Result code */
   FATFS fatfs;      /* File system object */
   FIL fil;        /* File object */
@@ -1182,7 +1212,7 @@ char filename[80];
   void die(char *str, FRESULT rc)
   {
     #ifdef DEBUGSERIAL
-    Serial.printf("%s: Failed with rc = %s.\n", str, FR_ERROR_STRING[rc]); for (;;) delay(100);
+    //Serial.printf("%s: Failed with rc = %s.\n", str, FR_ERROR_STRING[rc]); for (;;) delay(100);
     #endif
    }
 
@@ -1192,7 +1222,22 @@ char filename[80];
 
 //  uint32_t t0=0;
 //  uint32_t t1=0;
-  
+  // ************** //
+
+
+  void initPlay(void)
+  { const char *Device = "0:/";  // 0: SPI 1;SDIO 2:MSC
+    rc = f_mount (&fatfs, Device, 0);      /* Mount/Unmount a logical drive */
+    #ifdef DEBUGSERIAL
+      if (rc) die("close", rc);
+    #endif
+      
+    rc = f_chdrive(Device);
+    #ifdef DEBUGSERIAL
+      if((rc)) die("chdrive",rc);
+   #endif
+  }
+
   void initREC(void)
   { const char *Device = "1:/";  // 0: SPI 1;SDIO 2:MSC
     rc = f_mount (&fatfs, Device, 1);      /* Mount/Unmount a logical drive */
@@ -1205,9 +1250,13 @@ char filename[80];
       if((rc)) die("chdrive",rc);
    #endif
   }
-
+// ************** //
   void startREC(void)
   {
+    countRAWfiles(); // check how many files are present
+    
+    initREC();
+
     // close file
     if(isFileOpen)
     { //close file
@@ -1229,13 +1278,13 @@ char filename[80];
         Serial.println('start recording');
         Serial.println(filename);
         #endif
-      rc = f_stat (filename, 0);
+      rc = f_stat( filename, 0);
       #ifdef DEBUGSERIAL
-          Serial.printf("stat %s\n",STAT_ERROR_STRING[rc]);
+          //Serial.printf("stat %s\n",STAT_ERROR_STRING[rc]);
       #endif
       rc = f_open (&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
       #ifdef DEBUGSERIAL
-          Serial.printf(" opened %s\n\r",FR_ERROR_STRING[rc]);
+         //Serial.printf(" opened %s\n\r",FR_ERROR_STRING[rc]);
       #endif
       // check if file has errors
       if(rc == FR_INT_ERR)
@@ -1271,7 +1320,7 @@ char filename[80];
       isFileOpen=1;
     }
   }
-
+// ************** //
   void writeREC(AudioRecordQueue *recorder)
   {  
     const uint32_t N_BUFFER = 2;
@@ -1305,7 +1354,7 @@ char filename[80];
       }
     }
   }
-
+// ************** //
   void stopREC(AudioRecordQueue *recorder)
   {
     #ifdef DEBUGSERIAL
@@ -1334,6 +1383,7 @@ char filename[80];
     #ifdef DEBUGSERIAL
       Serial.println (" Recording stopped!");
     #endif
+    initPlay();
   }
 #else
   void initREC(void){}
@@ -1354,6 +1404,7 @@ char filename[80];
 
 // ****************************************************  RECORDING
 void startRecording() {
+
   startREC();
 
   //clear the screen completely
@@ -1399,12 +1450,21 @@ void stopRecording() {
 }
 // ******************************************  END RECORDING *************************
 
+
+#endif //USERECORD
+
+
 // **************** ******************************PLAYING ************************************************
+
+
 void startPlaying(int SR) {
 //      String NAME = "Bat_"+String(file_number)+".raw";
 //      char fi[15];
 //      NAME.toCharArray(fi, sizeof(NAME));
 playActive=true;
+#ifdef DEBUGSERIAL
+      Serial.println (" Started playing");
+#endif
 inputMixer.gain(0,0); //switch off the mic-line as input
 inputMixer.gain(1,1); //switch on the playerline as input
 
@@ -1415,6 +1475,10 @@ if (EncLeft_menu_idx==MENU_PLY)
       outputMixer.gain(0,0);  //shutdown heterodyne output
       freq_real_backup=freq_real; //keep track of heterodyne setting
   }
+
+ #ifdef DEBUGSERIAL
+      Serial.println (" Set mixers done");
+#endif 
   //direct play is used to test functionalty based on previous recorded data
   //this will play a previous recorded raw file through the system as if it were live data coming from the microphone
 if (EncLeft_menu_idx==MENU_PLD)
@@ -1432,18 +1496,45 @@ if (EncLeft_menu_idx==MENU_PLD)
   
   SR=constrain(SR,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
   set_sample_rate(SR);
+#ifdef DEBUGSERIAL
+      Serial.println (" Set sample rate done");
+#endif 
+
+
 #ifdef USESD
-  fileselect=constrain(fileselect,0,filecounter);
+  fileselect=constrain(fileselect,0,filecounter-1);
   strncpy(filename, filelist[fileselect],  13);
 
+  #ifdef DEBUGSERIAL
+      Serial.println (" fileselect finished");
+#endif 
   //default display is waterfall
   //display_mode=waterfallgraph;
-  display_settings();
+  //display_settings();
+  //check if the file can be played
+ #ifdef DEBUGSERIAL
+      Serial.println (" just before playing");
+      #endif
+ if (player.play(filename))
+    { 
+      #ifdef DEBUGSERIAL
+      Serial.println (" playing OK");
+      #endif
 
-  player.play(filename);
+    }
+    else
+    {
+     #ifdef DEBUGSERIAL
+      Serial.println (" Playing error");
+     #endif
+    }
+    
+   
+     
 #endif  
 
 }
+
 
 
 
@@ -1493,6 +1584,7 @@ void continuePlaying() {
 
 //*******************************EEPROM *********************************************************
 // original routines copied from https://github.com/DD4WH/Teensy-ConvolutionSDR/blob/master/Teensy_Convolution_SDR.ino
+#ifdef USEEEPROM
 
 #include <EEPROM.h>
 #include <util/crc16.h>
@@ -1685,6 +1777,7 @@ void EEPROM_SAVE() {
   saveInEEPROM(&E);
 } // end void eeProm SAVE
 
+#endif //ifdef useEEPROM
 
 
 // ******************************************************* MODES *****************************
@@ -1893,7 +1986,7 @@ void updateEncoder(uint8_t Encoderside )
       }
       /******************************TIME  ***************/
       if (EncLeft_menu_idx==MENU_TIME)
-      {  //struct tm tx =seconds2tm(RTC_TSR);
+      {  //struct tm tx =seconds2time(RTC_TSR);
          
          if (Encoderside==enc_leftside)
             {
@@ -1918,7 +2011,7 @@ void updateEncoder(uint8_t Encoderside )
     
               tft.setFont(Arial_24);
               char tstr[9];
-              struct tm tx = seconds2tm(RTC_TSR);
+              struct tm tx = seconds2time(RTC_TSR);
               snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
               tft.print(tstr);
               lastmillis=millis();
@@ -2009,7 +2102,9 @@ void updateButtons()
           #ifdef DEBUGSERIAL
               Serial.println("micropushL 1");
           #endif
+         #ifdef USERECORD 
          stopRecording();
+         #endif
          display_settings();
          recorderActive=false;
        }
@@ -2082,7 +2177,9 @@ void updateButtons()
           if (recorderActive==false)  // when recorder is active interaction gets picked up earlier !!
             {   recorderActive=true;
                 display_settings();
+                #ifdef USERECORD
                 startRecording();
+                #endif
             }
 
         }
@@ -2100,9 +2197,12 @@ void updateButtons()
           }
 
       if ((EncLeft_menu_idx==MENU_PRESET))
-          { EEPROM_SAVE(); //update preferred settings in EEprom
-            tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-20);
-            tft.println("EEprom SAVED");
+          { 
+            #ifdef USEEEPROM
+              EEPROM_SAVE(); //update preferred settings in EEprom
+              tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET-20);
+              tft.println("EEprom SAVED");
+            #endif  
           }    
 
      if (SD_ACTIVE)
@@ -2158,7 +2258,12 @@ void setup() {
   Serial.begin(9800);
   delay(5000); //wait 10 seconds 
  #endif
-  delay(200);
+  
+  #ifdef USETFT
+  tft.begin();
+  tft.setRotation( 0 );
+  tft.fillScreen(COLOR_BLACK);
+  #endif
 //setup Encoder Buttonpins with pullups
 
   pinMode(encoderButton_RIGHT,INPUT_PULLUP);
@@ -2191,23 +2296,24 @@ void setup() {
 
   
 /* EEPROM CHECK  */
+#ifdef USEEEPROM
  if (EEPROM_LOAD()==false) //load data fromEEprom, if it returns false (probably due to a change in structure) than start by saving default data"
    {
      EEPROM_SAVE();
    }
-    
+ #endif   
 
 
 // Init TFT display
 #ifdef USETFT
-  tft.begin();
-  tft.setRotation( 0 );
-  tft.fillScreen(COLOR_BLACK);
+  // tft.begin();
+  // tft.setRotation( 0 );
+  // tft.fillScreen(COLOR_BLACK);
   
   tft.setCursor(80,50);
   tft.setFont(Arial_20);
   char tstr[9];
-  struct tm tx = seconds2tm(RTC_TSR);
+  struct tm tx = seconds2time(RTC_TSR);
   snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
   tft.print(tstr);
   tft.setCursor(0,90);
@@ -2215,12 +2321,14 @@ void setup() {
   tft.setCursor(20,120);
   tft.println(versionStr);
   tft.println();
+  #ifdef USEEEPROM
   tft.print("EEprom v");
   snprintf(tstr,9,"%s",versionEE);
   //tft.println(String(versionEE));
   tft.println(tstr);
   tft.print("EEprom #");
   tft.println(EEsaved_count);
+  #endif
   
   delay(5000); //wait  seconds to clearly show the time
 
@@ -2257,7 +2365,9 @@ void setup() {
 if (SD_ACTIVE)
 // Recording on SD card by uSDFS library
   { 
-    initREC();
+    #ifdef USERECORD
+     initPlay();
+    #endif
   }
 
 // ***************** SETUP AUDIO *******************************
@@ -2281,7 +2391,6 @@ for (int16_t i = 0; i < 128; i++) {
 //switch to the preset or default detector_mode
 changeDetector_mode();
 
-
     
 } // END SETUP
 
@@ -2291,7 +2400,9 @@ void loop()
 {
 // If we're playing or recording, carry on...
   if (LeftButton_Mode == MODE_REC) {
+    #ifdef USERECORD
     continueRecording();
+    #endif
   }
 
   if (LeftButton_Mode == MODE_PLAY) 
@@ -2311,7 +2422,7 @@ void loop()
    }
 
   //update the time regularly
-  struct tm tx = seconds2tm(RTC_TSR);
+  struct tm tx = seconds2time(RTC_TSR);
   if (tx.tm_min!=old_time_min)
   { tft.setFont(Arial_16);
     tft.setCursor(180,20);
