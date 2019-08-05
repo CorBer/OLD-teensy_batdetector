@@ -7,8 +7,8 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.91 20190804"
-#define versionno 91 // used in EEProm storage
+#define batversion "v0.92 20190805"
+#define versionno 92 // used in EEProm storage
 
 // ***************************** GLOBAL DEFINES
 //#define DEBUGSERIAL
@@ -25,6 +25,14 @@
 
 
 /* changes  
+* v0.92 -further work on the setup to record/play files NEEDS TESTING 
+        -filename display shortened so no overlap with other menu
+        -filename selection (when playing) is now cyclic. 
+         To go to the latest recording just turn counterclockwise instead of stepping through all previous 
+        -rightside menu allows setting of samplerate (in all modes)
+        -during playing of files microphones will be switched off
+        -maximum number of files to be stored 999 (BXXX_RRR.RAW) XXX=0..999 RRR=samplerate in Khz
+                
 * v0.91 IMPORTANT :solved the issues with replay that were present since v0.86
 
 * v0.90 added define to allow encoder reversal (some encoders work counter-clockwise) 
@@ -178,7 +186,7 @@ boolean TE_ready=true; //when a TEcall is played this signals the end of the cal
 
 int filecounter=0;
 char filename[80];
-
+char shortfilename[13];
 
 // ************************************  TIME *****************************
 time_t getTeensy3Time()
@@ -506,13 +514,13 @@ float freq_Oscillator =50000;
 #define  MENU_MAX 12
 
 const int Leftchoices=MENU_MAX+1; //can have any value
-const int Rightchoices=MENU_FRQ+1; //allow up to FRQ
+const int Rightchoices=MENU_SR+1; //allow up to SR
 const char* MenuEntry [Leftchoices] =
   {
     "Vol.",
     "Gain",
     "Freq.",
-    "SampleR",
+    "SRate",
     "Denoise",
     "Preset",
     "ButtonL",
@@ -538,7 +546,7 @@ const char* MenuEntry [Leftchoices] =
 int detector_mode=detector_heterodyne;
 
 #ifdef USESD
-  #define MAX_FILES    50
+  #define MAX_FILES    999
   #define MAX_FILE_LENGTH  13   // 8 chars plus 4 for.RAW plus NULL
   char filelist[ MAX_FILES ][ MAX_FILE_LENGTH];
   int fileselect=0;
@@ -634,7 +642,11 @@ void display_settings() {
        if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) // when play selected only show filename
            { 
              #ifdef USESD
-             tft.print(filelist[fileselect]);
+             char* ch = strchr(filelist[fileselect], '.');
+             int cout = ch - filelist[fileselect] + 1; 
+             
+             strlcpy(shortfilename, filelist[fileselect], cout);
+             tft.print(shortfilename);
              #endif
            }
        else 
@@ -678,9 +690,9 @@ void display_settings() {
                 }
                 
           }    
-       if (EncLeft_menu_idx==MENU_PLY)
-          { tft.print(filecounter);
-          }
+      //  if (EncLeft_menu_idx==MENU_PLY)
+      //     { tft.print(filelist[fileselect]);
+      //     }
 
        if (EncRight_function==enc_value) 
          { tft.setTextColor(ENC_VALUE_COLOR);} //value is active
@@ -703,6 +715,7 @@ void display_settings() {
           tft.print("DISPLAY");
         if (LeftButton_Next==MODE_REC)
               {   tft.print("RECORD:");
+                  
                   }
         if (LeftButton_Next==MODE_PLAY)
             { tft.print("PLAY");
@@ -1182,7 +1195,7 @@ void updatedisplay(void)
           }
           entry.close();
         }
-        delay(5000);
+        
   }
 // ************** //
   int initSD(void)
@@ -1194,9 +1207,6 @@ void updatedisplay(void)
   int initSD(void) {}
   void countRAWfiles(void) {}
 #endif
-
-
-
 
 
 #ifdef USERECORD
@@ -1226,21 +1236,18 @@ void updatedisplay(void)
 
 
   void initPlay(void)
-  { const char *Device = "0:/";  // 0: SPI 1;SDIO 2:MSC
-    rc = f_mount (&fatfs, Device, 0);      /* Mount/Unmount a logical drive */
-    #ifdef DEBUGSERIAL
-      if (rc) die("close", rc);
-    #endif
-      
-    rc = f_chdrive(Device);
-    #ifdef DEBUGSERIAL
-      if((rc)) die("chdrive",rc);
-   #endif
+
+  { 
+    //switch to the player using device 0 
+    const char *Device = "1:/";  // 0: SPI 1;SDIO 2:MSC
+    f_mount (nullptr, Device, 1);      /* Unmount a logical drive */
+
+    SD.begin(BUILTIN_SDCARD); //make ready for playing
   }
 
   void initREC(void)
   { const char *Device = "1:/";  // 0: SPI 1;SDIO 2:MSC
-    rc = f_mount (&fatfs, Device, 1);      /* Mount/Unmount a logical drive */
+    rc = f_mount (&fatfs, Device, 1);      /* Mount a logical drive */
     #ifdef DEBUGSERIAL
       if (rc) die("close", rc);
     #endif
@@ -1253,10 +1260,7 @@ void updatedisplay(void)
 // ************** //
   void startREC(void)
   {
-    countRAWfiles(); // check how many files are present
     
-    initREC();
-
     // close file
     if(isFileOpen)
     { //close file
@@ -1383,7 +1387,9 @@ void updatedisplay(void)
     #ifdef DEBUGSERIAL
       Serial.println (" Recording stopped!");
     #endif
-    initPlay();
+
+    countRAWfiles(); //update the counter !
+    
   }
 #else
   void initREC(void){}
@@ -1465,16 +1471,17 @@ playActive=true;
 #ifdef DEBUGSERIAL
       Serial.println (" Started playing");
 #endif
-inputMixer.gain(0,0); //switch off the mic-line as input
-inputMixer.gain(1,1); //switch on the playerline as input
 
-if (EncLeft_menu_idx==MENU_PLY)
-  {
-      outputMixer.gain(2,1);  //player to output
-      outputMixer.gain(1,0);  //shutdown granular output
-      outputMixer.gain(0,0);  //shutdown heterodyne output
-      freq_real_backup=freq_real; //keep track of heterodyne setting
-  }
+// inputMixer.gain(0,0); //switch off the mic-line as input
+// inputMixer.gain(1,1); //switch on the playerline as input
+
+// if (EncLeft_menu_idx==MENU_PLY)
+//   {
+//       outputMixer.gain(2,1);  //player to output
+//       outputMixer.gain(1,0);  //shutdown granular output
+//       outputMixer.gain(0,0);  //shutdown heterodyne output
+//       freq_real_backup=freq_real; //keep track of heterodyne setting
+//   }
 
  #ifdef DEBUGSERIAL
       Serial.println (" Set mixers done");
@@ -1551,18 +1558,19 @@ void stopPlaying() {
 #endif
   playActive=false;
   
-  //restore last sample_rate setting
-  set_sample_rate(last_sample_rate);
+  // //restore last sample_rate setting
+  // set_sample_rate(last_sample_rate);
   
-  freq_real=freq_real_backup;
-  //restore heterodyne frequency
-  set_freq_Oscillator (freq_real);
-  outputMixer.gain(2,0); //stop the direct line output
-  outputMixer.gain(1,1); // open granular output
-  outputMixer.gain(0,1); // open heterodyne output
+  // freq_real=freq_real_backup;
+  // //restore heterodyne frequency
+  // set_freq_Oscillator (freq_real);
 
-  inputMixer.gain(0,1); //switch on the mic-line
-  inputMixer.gain(1,0); //switch off the playerline
+  // outputMixer.gain(2,0); //stop the direct line output
+  // outputMixer.gain(1,1); // open granular output
+  // outputMixer.gain(0,1); // open heterodyne output
+
+  // inputMixer.gain(0,1); //switch on the mic-line
+  // inputMixer.gain(1,0); //switch off the playerline
  
 }
 
@@ -1915,6 +1923,15 @@ void updateEncoder(uint8_t Encoderside )
           sgtl5000.volume(V);
           AudioInterrupts();
         }
+
+
+      /******************************MAIN SAMPLE_RATE   ***************/
+      if ((menu_idx==MENU_SR) )  //only selects a possible sample_rate, user needs to press a button to SET sample_rate
+        { sample_rate+=change;
+          sample_rate=constrain(sample_rate,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
+          set_sample_rate(sample_rate);
+        }
+
      /******************************AUTO TE SPEED  ***************/
         if (menu_idx==MENU_TES)
         { TE_speed+=change;
@@ -2018,12 +2035,6 @@ void updateEncoder(uint8_t Encoderside )
             }
       }  
 
-      /******************************MAIN SAMPLE_RATE   ***************/
-      if ((EncLeft_menu_idx==MENU_SR) and (EncLeft_function==enc_value))  //only selects a possible sample_rate, user needs to press a button to SET sample_rate
-        { sample_rate+=EncLeftchange;
-          sample_rate=constrain(sample_rate,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
-          set_sample_rate(sample_rate);
-        }
 
        if ((EncLeft_menu_idx==MENU_PRESET) and (EncLeft_function==enc_value))  //only selects a possible sample_rate, user needs to press a button to SET sample_rate
         { preset_idx+=EncLeftchange;
@@ -2036,7 +2047,13 @@ void updateEncoder(uint8_t Encoderside )
          {  
            #ifdef USESD
            fileselect+=EncLeftchange;
+           if (fileselect<0)
+             { fileselect=filecounter-1;}
+           if (fileselect>filecounter-1)  
+             {fileselect=0;}
+
            fileselect=constrain(fileselect,0,filecounter-1);
+           
            #endif
          }
 
@@ -2191,9 +2208,13 @@ void updateButtons()
     if (encoderButton_L.risingEdge())
     {
       EncLeft_function=!EncLeft_function; 
-
+      
+      //user has confirmed the choice for the leftbuttonmenu
       if ((EncLeft_menu_idx==MENU_BUTTONL)  )  
           {LeftButton_Mode=LeftButton_Next; //select the choosen function for the leftbutton
+          if (LeftButton_Mode==MODE_REC)
+            { initREC();
+             }
           }
 
       if ((EncLeft_menu_idx==MENU_PRESET))
@@ -2208,11 +2229,22 @@ void updateButtons()
      if (SD_ACTIVE)
      {
        //play menu got choosen, make sure the LeftButton now also switched to Play mode
+
         if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) //choose to select values
          { //keep track of the sample_rate
            last_sample_rate=sample_rate;
            sample_rate=play_rate;
            LeftButton_Mode=MODE_PLAY; // directly set LEFTBUTTON to play/stop mode
+           initPlay();
+           //shut down input
+           inputMixer.gain(0,0); //switch off the mic-line as input
+           inputMixer.gain(1,1); //switch on the playerline as input
+                      
+           outputMixer.gain(2,1);  //player to output
+           outputMixer.gain(1,0);  //shutdown granular output
+           outputMixer.gain(0,0);  //shutdown heterodyne output
+           freq_real_backup=freq_real; //keep track of heterodyne setting           
+           
            countRAWfiles(); // update the filelist
            //set the right encoder to samplerate
            EncRight_menu_idx=MENU_SR;
@@ -2221,6 +2253,26 @@ void updateButtons()
               Serial.println("direct set MODEPLAY");
            #endif   
          }
+         else
+         {
+            //restore last sample_rate setting
+            set_sample_rate(last_sample_rate);
+            
+            freq_real=freq_real_backup;
+            //restore heterodyne frequency
+            set_freq_Oscillator (freq_real);
+            
+            outputMixer.gain(2,0); //stop the direct line output
+            outputMixer.gain(1,1); // open granular output
+            outputMixer.gain(0,1); // open heterodyne output
+
+            inputMixer.gain(0,1); //switch on the mic-line
+            inputMixer.gain(1,0); //switch off the playerline
+ 
+         }
+         
+
+
         //automatically change LEFTbutton back to displaymode if it was on play previously
         if ((EncLeft_function==enc_menu) and (LeftButton_Mode==MODE_PLAY))
           {LeftButton_Mode=MODE_DISPLAY;
@@ -2362,13 +2414,7 @@ void setup() {
     countRAWfiles();
   }
 
-if (SD_ACTIVE)
-// Recording on SD card by uSDFS library
-  { 
-    #ifdef USERECORD
-     initPlay();
-    #endif
-  }
+
 
 // ***************** SETUP AUDIO *******************************
 set_sample_rate (sample_rate);
