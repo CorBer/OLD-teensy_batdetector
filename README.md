@@ -4,9 +4,19 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
 
-<b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine ! NOT SOLVED YET</b> 
+<b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine. From V0.91 working again</b> 
 
-<b>0.91</b><br> CURRENTLY TESTING
+<b>v0.92</b>
+-further work on the setup to record/play files <b>NEEDS TESTING<b> 
+-filename display shortened so no overlap with other menu
+-filename selection (when playing) is now cyclic
+ To go to the latest recording just turn counterclockwise instead of stepping through all previous 
+-rightside menu allows setting of samplerate (in all modes)
+-during playing of files microphones will be switched off
+-maximum number of files to be stored 999 (BXXX_RRR.RAW) XXX=0..999 RRR=samplerate in Khz
+
+
+<b>0.91</b><br> intermediate test version !! 
 -this hopefully solves the issues with replay of recorded files that were present since v0.84 
 
 <b>0.89</b><br> 
