@@ -7,8 +7,8 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.92 20190805"
-#define versionno 92 // used in EEProm storage
+#define batversion "v0.93 20190808"
+#define versionno 93 // used in EEProm storage
 
 // ***************************** GLOBAL DEFINES
 //#define DEBUGSERIAL
@@ -1926,10 +1926,11 @@ void updateEncoder(uint8_t Encoderside )
 
 
       /******************************MAIN SAMPLE_RATE   ***************/
-      if ((menu_idx==MENU_SR) )  //only selects a possible sample_rate, user needs to press a button to SET sample_rate
+      if ((menu_idx==MENU_SR) )  //selects a possible sample_rate
         { sample_rate+=change;
           sample_rate=constrain(sample_rate,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
           set_sample_rate(sample_rate);
+          last_sample_rate=sample_rate;
         }
 
      /******************************AUTO TE SPEED  ***************/
@@ -2036,7 +2037,7 @@ void updateEncoder(uint8_t Encoderside )
       }  
 
 
-       if ((EncLeft_menu_idx==MENU_PRESET) and (EncLeft_function==enc_value))  //only selects a possible sample_rate, user needs to press a button to SET sample_rate
+       if ((EncLeft_menu_idx==MENU_PRESET) and (EncLeft_function==enc_value))  
         { preset_idx+=EncLeftchange;
           preset_idx=preset_idx%2;
         }
@@ -2354,7 +2355,12 @@ void setup() {
      EEPROM_SAVE();
    }
  #endif   
+  analogReference(DEFAULT);
+  analogReadResolution(12);
+  analogReadAveraging(32);
 
+  int mv;
+  mv = 1195 * 4096 /analogRead(71);
 
 // Init TFT display
 #ifdef USETFT
@@ -2381,6 +2387,9 @@ void setup() {
   tft.print("EEprom #");
   tft.println(EEsaved_count);
   #endif
+  tft.println();
+  tft.print("Voltage:");
+  tft.println(mv);
   
   delay(5000); //wait  seconds to clearly show the time
 
