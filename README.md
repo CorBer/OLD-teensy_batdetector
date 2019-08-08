@@ -11,13 +11,13 @@ minor changes:<br>
  
 
 <b>v0.92</b>
--further work on the setup to record/play files <b>NEEDS TESTING</b> <br>
--filename display shortened so no overlap with other menu <br>
--filename selection (when playing) is now cyclic <br>
+ - further work on the setup to record/play files <b>NEEDS TESTING</b> <br>
+ - filename display shortened so no overlap with other menu <br>
+ - filename selection (when playing) is now cyclic <br>
  To go to the latest recording just turn counterclockwise instead of stepping through all previous  <br>
--rightside menu allows setting of samplerate (in all modes) <br>
--during playing of files microphones will be switched off <br>
--maximum number of files to be stored 999 (BXXX_RRR.RAW) XXX=0..999 RRR=samplerate in Khz <br>
+ - rightside menu allows setting of samplerate (in all modes) <br>
+ - during playing of files microphones will be switched off <br>
+ - maximum number of files to be stored 999 (BXXX_RRR.RAW) XXX=0..999 RRR=samplerate in Khz <br>
 
 
 <b>0.91</b><br> intermediate test version !! 
