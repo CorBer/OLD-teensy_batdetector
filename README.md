@@ -4,7 +4,11 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
 
-<b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine. From V0.91 working again</b> 
+<b>v0.93</b>
+- minor changes:<br>
+ - changing sample_rate was not stored properly in previous versions<br>
+ - added system-voltage in startup-display (for future battery managment)<br>
+ 
 
 <b>v0.92</b>
 -further work on the setup to record/play files <b>NEEDS TESTING</b> <br>
@@ -18,6 +22,8 @@ latest changes<br>
 
 <b>0.91</b><br> intermediate test version !! 
 -this hopefully solves the issues with replay of recorded files that were present since v0.84 
+
+<b>IMPORTANT: updates since version 0.84 have problems with replaying files from the SD-card. Recording works fine. From V0.91 working again</b> 
 
 <b>0.89</b><br> 
 - eeprom version 0001
