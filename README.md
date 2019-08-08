@@ -5,7 +5,7 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 latest changes<br>
 
 <b>v0.93</b>
-- minor changes:<br>
+minor changes:<br>
  - changing sample_rate was not stored properly in previous versions<br>
  - added system-voltage in startup-display (for future battery managment)<br>
  
