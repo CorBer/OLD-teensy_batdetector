@@ -25,6 +25,10 @@
 
 
 /* changes  
+v0.93 minor changes:
+   changing sample_rate was not stored properly in previous versions
+   added system-voltage in startup-display (for future battery managment)
+
 * v0.92 -further work on the setup to record/play files NEEDS TESTING 
         -filename display shortened so no overlap with other menu
         -filename selection (when playing) is now cyclic. 
