@@ -4,6 +4,7 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
 <b> v0.94 important changes:</b>
+- Lower menu format on screen now follows the alignment of the encoders/buttons on Edwins PCB. So the encoders control the lower line on bottom part of the screen(SETTINGS) and the buttons control the upper line on the bottom of the screen (MODES). <br>
 - EEprom saving was not always when asked to restart in the user mode<br>
 - when no SD card was mounted the Left Encodermenu was not cyclic (jumped back to volume)<br>
 - when no sD card was mounted user could still set the LEFT button to RECORD or PLAY<br>
