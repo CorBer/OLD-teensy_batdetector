@@ -9,7 +9,8 @@ latest changes<br>
 - when no sD card was mounted user could still set the LEFT button to RECORD or PLAY<br>
 
 <b>minor changes</b>:
-- store the detectormode when starting a recording and restore after stopping a recording
+- store the detectormode when starting a recording and restore after stopping a recording<br>
+
  <b> bug repair:</b>
   in previous versions the recording system was not checking if a filename allready existed but only checked the number of files on the SD. If a file was removed (for instance from a PC) this would lead to overwriting existing files. <br>
   In the new setup the new filenumber for a recording will be checked against highest filenumber in the
