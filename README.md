@@ -4,17 +4,15 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 
 latest changes<br>
 <b> v0.94 important changes:</b>
-        - EEprom saving was not always when asked to restart in the user mode<br>
-        - when no SD card was mounted the Left Encodermenu was not cyclic (jumped back to volume)<br>
-        - when no sD card was mounted user could still set the LEFT button to RECORD or PLAY<br>
+- EEprom saving was not always when asked to restart in the user mode<br>
+- when no SD card was mounted the Left Encodermenu was not cyclic (jumped back to volume)<br>
+- when no sD card was mounted user could still set the LEFT button to RECORD or PLAY<br>
 
-        <b>minor changes</b>:
-        -store the detectormode when starting a recording and restore after stopping a recording
-        - bug repair:
-          in previous versions the recording system was not checking if a filename allready existed but only 
-          checked the number of files on the SD. If a file was removed (for instance from a PC) this would lead to 
-          overwriting existing files. 
-          In the new setup the new filenumber for a recording will be checked against highest filenumber in the
+<b>minor changes</b>:
+- store the detectormode when starting a recording and restore after stopping a recording
+ <b> bug repair:</b>
+  in previous versions the recording system was not checking if a filename allready existed but only checked the number of files on the SD. If a file was removed (for instance from a PC) this would lead to overwriting existing files. <br>
+  In the new setup the new filenumber for a recording will be checked against highest filenumber in the
           allready stored files.
 
 <b>v0.93</b>
