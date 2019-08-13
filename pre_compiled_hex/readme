@@ -8,7 +8,5 @@ teensy_batdetector_082pwf.hex
 teensy_batdetector_084pwf.hex
 
 Provided by Corbee 
-firmwarev086_corbee.hex //version 0.86
-firmwarecorbeeV088.hex //version 0.88 
-firmwarecorbeeV088.hex //version 0.89
-firmwarecorbeeV091.hex //version 0.91 TESTING CURRENTLY 
+firmwarecorbee_vxxx /version xxx
+f 
