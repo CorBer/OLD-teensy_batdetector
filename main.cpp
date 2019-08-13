@@ -7,8 +7,8 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
-#define batversion "v0.93 20190808"
-#define versionno 93 // used in EEProm storage
+#define batversion "v0.94 20190809"
+#define versionno 94 // used in EEProm storage
 
 // ***************************** GLOBAL DEFINES
 //#define DEBUGSERIAL
@@ -24,10 +24,24 @@
 #define USEEEPROM //allows to remove EEprom section (needed for testing)
 
 
-/* changes  
-v0.93 minor changes:
-   changing sample_rate was not stored properly in previous versions
-   added system-voltage in startup-display (for future battery managment)
+/* changes 
+* v0.94 important changes:
+        -EEprom saving was not always when asked to restart in the user mode
+        -when no SD card was mounted the Left Encodermenu was not cyclic (jumped back to volume)
+        -when no sD card was mounted user could still set the LEFT button to RECORD or PLAY
+
+        minor changes:
+        -store the detectormode when starting a recording and restore after stopping a recording
+        - bug repair:
+          in previous versions the recording system was not checking if a filename allready existed but only 
+          checked the number of files on the SD. If a file was removed (for instance from a PC) this would lead to 
+          overwriting existing files. 
+          In the new setup the new filenumber for a recording will be checked against highest filenumber in the
+          allready stored files.
+
+* v0.93 minor changes:
+         changing sample_rate was not stored properly in previous versions
+        added system-voltage in startup-display (for future battery managment)
 
 * v0.92 -further work on the setup to record/play files NEEDS TESTING 
         -filename display shortened so no overlap with other menu
@@ -70,12 +84,13 @@ v0.93 minor changes:
  *     TEENSY audio board
  *     Ultrasonic microphone with seperate preamplifier connected to mic/gnd on audioboard
  *       eg. Knowles MEMS SPU0410LR5H-QB
+ *           ICS - 40730 
  *     TFT based on ILI9341
  *     2 rotary encoders with pushbutton
  *     2 pushbuttons
  *     SDCard
  * 
- *  when using a GX12 connector for the microphone: pinout 1=signal, 2=GND, 3=+V, 4=GND 
+ *  when using a GX16-4 connector for the microphone: pinout 1=signal, 2=GND, 3=+V, 4=GND 
  *
 *   IMPORTANT: uses the SD card slot of the Teensy, NOT the SD card slot of the audio board
  *
@@ -137,30 +152,30 @@ v0.93 minor changes:
 /* CORBEE */
 /* TEENSY 3.6 PINSETUP (20180814)
 
-                  GND                  Vin  - PREAMP V+
-                   0                   Analog GND
-                   1                   3.3V - MEMS MIC
-                   2                   23 AUDIO -LRCLK
-                   3                   22 AUDIO -TX
-                   4                   21 TFT CS
-                   5                   20 TFT DC
-       AUDIO MEMCS 6                   19 AUDIO - SCL
-       AUDIO MOSI  7                   18 AUDIO - SDA
-                   8                   17
-       AUDIO BCLK  9                   16
-       AUDIO SDCS 10                  15 AUDIO -VOL
-       AUDIO MCLK 11                  14 AUDIO -SCLK
-       AUDIO MISO 12                  13 AUDIO -RX
-                  3.3V                GND
-                  24                  A22
-                  25                  A21
-                  26                  39  TFT MISO
-        TFT SCLK  27                  38  MICROPUSH_L
-        TFT MOSI  28                  37  MICROPUSH_R
-     ENC_L-BUTTON 29                  36  ENC_R-BUTTON
-     ENC_L A      30                  35  ENC_R A
-     ENC_L B      31                  34  ENC_R B
-                  32                  33
+                 GND *                * Vin  - PREAMP V+
+                   0 .                *   Analog GND
+                   1 .                *  3.3V - MEMS MIC
+                   2 .                *  23 AUDIO -LRCLK
+                   3 .                *  22 AUDIO -TX
+                   4 .                *  21 TFT CS
+                   5 .                *  20 TFT DC
+       AUDIO MEMCS 6 *                *  19 AUDIO - SCL
+       AUDIO MOSI  7 *                *  18 AUDIO - SDA
+                   8 .                .  17
+       AUDIO BCLK  9 *                .  16
+       AUDIO SDCS 10 *                *  15 AUDIO -VOL
+       AUDIO MCLK 11 *                *  14 AUDIO -SCLK
+       AUDIO MISO 12 *                *  13 AUDIO -RX
+                3.3V *                *  GND
+                  24 .                .  A22
+                  25 .                .  A21
+                  26 .                *  39  TFT MISO
+        TFT SCLK  27 *                *  38  MICROPUSH_L
+        TFT MOSI  28 *                *  37  MICROPUSH_R
+     ENC_L-BUTTON 29 *                *  36  ENC_R-BUTTON
+     ENC_L A      30 *                *  35  ENC_R A
+     ENC_L B      31 *                *  34  ENC_R B
+                  32 .                .  33
 
 */
 
@@ -189,6 +204,7 @@ boolean TE_ready=true; //when a TEcall is played this signals the end of the cal
 // ****************************************************  FILE SYSTEMS
 
 int filecounter=0;
+int filemax=0;
 char filename[80];
 char shortfilename[13];
 
@@ -388,6 +404,7 @@ int16_t granularMemory[GRANULAR_MEMORY_SIZE];
 
 #define waterfallgraph 2
 #define spectrumgraph 1
+#define no_graph 0
 
 int idx_t = 0;
 int idx = 0;
@@ -495,7 +512,6 @@ int freq_real_backup=freq_real; //used to return to proper listening setting aft
 float freq_Oscillator =50000;
 
 
-
 /******************* MENU ********************************/
 /*********************************************************/
 
@@ -548,6 +564,7 @@ const char* MenuEntry [Leftchoices] =
 
 //default
 int detector_mode=detector_heterodyne;
+int last_detector_mode=detector_heterodyne;
 
 #ifdef USESD
   #define MAX_FILES    999
@@ -578,6 +595,7 @@ void display_settings() {
 
     tft.setFont(Arial_16);
     tft.fillRect(0,0,240,TOP_OFFSET-50,MENU_BCK_COLOR);
+    tft.drawLine(0,TOP_OFFSET-50, 240, TOP_OFFSET-50, COLOR_WHITE);
     if (display_mode==spectrumgraph)
       { tft.fillRect(0,TOP_OFFSET-30,240,30,COLOR_BLACK);
       }
@@ -587,6 +605,7 @@ void display_settings() {
     
     tft.fillRect(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET,240,BOTTOM_OFFSET_PART,MENU_BCK_COLOR);
     tft.fillRect(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART,240,BOTTOM_OFFSET,MENU_BCK_COLOR_PART);
+    
 
     tft.setCursor(0,0);
     tft.print("g"); tft.print(mic_gain);
@@ -628,9 +647,12 @@ void display_settings() {
       tft.print(tstr);
      
      /****************** SHOW ENCODER/BUTTON SETTING ***********************/
-     
+     int LINE2=BOTTOM_OFFSET;
+     int LINE1=BOTTOM_OFFSET_PART;
+
+
      // push the cursor to the lower part of the screen 
-     tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET); //position of encoder functions
+     tft.setCursor(0,ILI9341_TFTHEIGHT-LINE1); //position of encoder functions
        
      // set the colors according to the function of the encoders
      //if (RightButton_Mode==MODE_DETECT )
@@ -650,7 +672,8 @@ void display_settings() {
              int cout = ch - filelist[fileselect] + 1; 
              
              strlcpy(shortfilename, filelist[fileselect], cout);
-             tft.print(shortfilename);
+             tft.print(shortfilename); 
+             
              #endif
            }
        else 
@@ -691,6 +714,7 @@ void display_settings() {
                 {tft.print("DEFAULT");}
                 else
                 {tft.print("USER");
+                 preset_idx=1; //force
                 }
                 
           }    
@@ -704,13 +728,13 @@ void display_settings() {
          { tft.setTextColor(ENC_MENU_COLOR);} //menu is active
 
        uint16_t dx=calc_menu_dxoffset((MenuEntry[EncRight_menu_idx]));
-       tft.setCursor(ILI9341_TFTWIDTH-dx,ILI9341_TFTHEIGHT-BOTTOM_OFFSET);
+       tft.setCursor(ILI9341_TFTWIDTH-dx,ILI9341_TFTHEIGHT-LINE1);
        tft.print(MenuEntry[EncRight_menu_idx]);
        
     }
     
     // push the cursor to the lower part of the screen 
-    tft.setCursor(0,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART); //position of button functions
+    tft.setCursor(0,ILI9341_TFTHEIGHT-LINE2); //position of button functions
     tft.setTextColor(COLOR_YELLOW);
    
     if ((EncLeft_menu_idx==MENU_BUTTONL ) and (EncLeft_function==enc_value)) //show the setting that is getting changed
@@ -758,7 +782,7 @@ void display_settings() {
 
     if (playActive==false) //dont show rightside menu choice when playing a file to allow the display of a filename
      {uint16_t sx=tft.strPixelLen(s);
-      tft.setCursor(ILI9341_TFTWIDTH-sx-5,ILI9341_TFTHEIGHT-BOTTOM_OFFSET_PART);
+      tft.setCursor(ILI9341_TFTWIDTH-sx-5,ILI9341_TFTHEIGHT-LINE2);
       tft.print(s);
      }  
 
@@ -791,7 +815,7 @@ void display_settings() {
       }
       else 
         { tft.setCursor(0,TOP_OFFSET-SPECTRUMSCALE);
-          tft.print("DISPLAY DISABLED");
+          tft.print("NO GRAPHS");
         }
    #endif
 }
@@ -1157,6 +1181,75 @@ void updatedisplay(void)
 #endif
 }
 
+// ******************************************************* MODES *****************************
+void defaultMenuPosition()
+{EncLeft_menu_idx=MENU_VOL;
+ EncLeft_function=enc_value;
+ EncRight_menu_idx=MENU_MIC;
+ EncRight_function=enc_value;
+}
+
+int heterodynemixer=0;
+int granularmixer=1;
+
+void setMixer(int mode)
+ {if (mode==heterodynemixer)
+  { outputMixer.gain(1,0);  //stop granular output
+    outputMixer.gain(0,1);  //start heterodyne output
+  }
+ if (mode==granularmixer)
+  { outputMixer.gain(1,1);  //start granular output
+    outputMixer.gain(0,0);  //shutdown heterodyne output
+  }
+}
+//  ********************************************* MAIN MODE CHANGE ROUTINE *************************
+void changeDetector_mode()
+{
+  #ifdef DEBUGSERIAL
+    Serial.print("Changedetector ");
+
+    Serial.println(detector_mode);
+  #endif    
+  if (detector_mode==detector_heterodyne)
+         { granular1.stop(); //stop other detecting routines
+           setMixer(heterodynemixer);
+           //switch menu to volume/frequency
+           EncLeft_menu_idx=MENU_VOL;
+           EncLeft_function=enc_value;
+           EncRight_menu_idx=MENU_FRQ;
+           EncRight_function=enc_value;
+         }
+  if (detector_mode==detector_divider)
+         { granular1.beginDivider(GRANULAR_MEMORY_SIZE);
+           setMixer(granularmixer);
+           defaultMenuPosition();
+         }
+
+  if (detector_mode==detector_Auto_TE)
+         {  granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
+           setMixer(granularmixer);
+           granular1.setSpeed(1.0/TE_speed); //default TE is 1/0.06 ~ 1/16 :TODO, switch from 1/x floats to divider value x
+           defaultMenuPosition();
+       }
+  if (detector_mode==detector_Auto_heterodyne)
+         { granular1.stop();
+           setMixer(heterodynemixer);
+           defaultMenuPosition();
+         }
+
+  if (detector_mode==detector_passive)
+         { granular1.stop(); //stop all other detecting routines
+           outputMixer.gain(2,1);  //direct line to output
+           outputMixer.gain(1,0);  //shutdown granular output
+           outputMixer.gain(0,0);  //shutdown heterodyne output
+           defaultMenuPosition();
+         }
+       else // always shut down the direct output line except for passive
+        {  outputMixer.gain(2,0);  //shut down direct line to output
+        }
+
+}
+
 
 // ************************************  SD *****************************
 
@@ -1177,7 +1270,7 @@ void updatedisplay(void)
   {
       filecounter=0;
       root = SD.open("/");
-
+      filemax=0;   
       while (true) {
           File entry =  root.openNextFile();
           if ((! entry) and (filecounter < MAX_FILES )) {
@@ -1190,6 +1283,12 @@ void updatedisplay(void)
           String fname=entry.name();
           if (fname.indexOf(".raw"))
             {strcpy(filelist[filecounter],entry.name() );
+             //construct filenumber from filename to avoid overwriting
+             int p=fname.indexOf("_");
+             int num=fname.substring(1,p).toInt(); 
+             if (num>filemax)
+                 {filemax=num;}
+                        
              //tft.println(entry.name());
              #ifdef DEBUGSERIAL
               Serial.println(filelist[filecounter]);
@@ -1199,6 +1298,7 @@ void updatedisplay(void)
           }
           entry.close();
         }
+        
         
   }
 // ************** //
@@ -1278,10 +1378,10 @@ void updatedisplay(void)
     if (filecounter<MAX_FILES) // limit files to MAX_FILES
     if(!isFileOpen)
     {
-      filecounter++;
+      filemax++;
       //automated filename BA_S.raw where A=file_number and S shows samplerate. Has to fit 8 chars
       // so max is B999_192.raw
-      sprintf(filename, "B%u_%s.raw", filecounter, SRtext);
+      sprintf(filename, "B%u_%s.raw", filemax, SRtext);
         #ifdef DEBUGSERIAL
         Serial.println('start recording');
         Serial.println(filename);
@@ -1435,7 +1535,7 @@ void startRecording() {
   mixFFT.gain(0,0);
 
   outputMixer.gain(1,0);  //shutdown granular output
-
+  last_detector_mode=detector_mode; // save last used detectormode
   detector_mode=detector_heterodyne; // can only listen to heterodyne when recording 
 
   outputMixer.gain(0,1);
@@ -1456,7 +1556,9 @@ void stopRecording() {
   //switch on FFT
   tft.fillScreen(COLOR_BLACK);
   mixFFT.gain(0,1);
- 
+
+  detector_mode=last_detector_mode;
+  changeDetector_mode();
 }
 // ******************************************  END RECORDING *************************
 
@@ -1744,10 +1846,11 @@ boolean EEPROM_LOAD() {
     
     if (E.preset_idx==1) //user has set preset_idx to default to usersettings
       {
-        
         play_rate=E.play_rate; //replay speed
         sample_rate=E.sample_rate; //sample rate 
         preset_idx=E.preset_idx; // default or user settings at startup
+        if (preset_idx!=0) 
+          {preset_idx=1;}
         detector_mode=E.detector_mode; // detector mode
         display_mode=E.display_mode;
         TE_speed=E.TE_speed; //replay speed for TE
@@ -1792,74 +1895,7 @@ void EEPROM_SAVE() {
 #endif //ifdef useEEPROM
 
 
-// ******************************************************* MODES *****************************
-void defaultMenuPosition()
-{EncLeft_menu_idx=MENU_VOL;
- EncLeft_function=enc_value;
- EncRight_menu_idx=MENU_MIC;
- EncRight_function=enc_value;
-}
 
-int heterodynemixer=0;
-int granularmixer=1;
-
-void setMixer(int mode)
- {if (mode==heterodynemixer)
-  { outputMixer.gain(1,0);  //stop granular output
-    outputMixer.gain(0,1);  //start heterodyne output
-  }
- if (mode==granularmixer)
-  { outputMixer.gain(1,1);  //start granular output
-    outputMixer.gain(0,0);  //shutdown heterodyne output
-  }
-}
-//  ********************************************* MAIN MODE CHANGE ROUTINE *************************
-void changeDetector_mode()
-{
-  #ifdef DEBUGSERIAL
-    Serial.print("Changedetector ");
-
-    Serial.println(detector_mode);
-  #endif    
-  if (detector_mode==detector_heterodyne)
-         { granular1.stop(); //stop other detecting routines
-           setMixer(heterodynemixer);
-           //switch menu to volume/frequency
-           EncLeft_menu_idx=MENU_VOL;
-           EncLeft_function=enc_value;
-           EncRight_menu_idx=MENU_FRQ;
-           EncRight_function=enc_value;
-         }
-  if (detector_mode==detector_divider)
-         { granular1.beginDivider(GRANULAR_MEMORY_SIZE);
-           setMixer(granularmixer);
-           defaultMenuPosition();
-         }
-
-  if (detector_mode==detector_Auto_TE)
-         {  granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
-           setMixer(granularmixer);
-           granular1.setSpeed(1.0/TE_speed); //default TE is 1/0.06 ~ 1/16 :TODO, switch from 1/x floats to divider value x
-           defaultMenuPosition();
-       }
-  if (detector_mode==detector_Auto_heterodyne)
-         { granular1.stop();
-           setMixer(heterodynemixer);
-           defaultMenuPosition();
-         }
-
-  if (detector_mode==detector_passive)
-         { granular1.stop(); //stop all other detecting routines
-           outputMixer.gain(2,1);  //direct line to output
-           outputMixer.gain(1,0);  //shutdown granular output
-           outputMixer.gain(0,0);  //shutdown heterodyne output
-           defaultMenuPosition();
-         }
-       else // always shut down the direct output line except for passive
-        {  outputMixer.gain(2,0);  //shut down direct line to output
-        }
-
-}
 
 //*****************************************************update encoders
 void updateEncoder(uint8_t Encoderside )
@@ -1890,23 +1926,28 @@ void updateEncoder(uint8_t Encoderside )
   if (encodermode==enc_menu)
     { menu_idx=menu_idx+change;
 
+      
+
+      //remove functionality when SD is not active, so no SDCARD mounted or SDCARD is unreadable
+      if (!SD_ACTIVE)
+        { if ((menu_idx==MENU_PLD) or (menu_idx==MENU_PLY) )
+           { // move menu to next available option
+           if (change==1) 
+             {menu_idx=MENU_PLD+1; }
+           if (change==-1)
+             {menu_idx=MENU_PLY-1;}
+             
+           }
+        }
       //allow revolving choices
       if (menu_idx<0)
         {menu_idx=choices-1;}
       if (menu_idx>=choices)
         {menu_idx=0;}
 
-      //remove functionality when SD is not active, so no SDCARD mounted or SDCARD is unreadable
-      if (!SD_ACTIVE)
-        { if ((menu_idx==MENU_PLD) or (menu_idx==MENU_PLY) )
-           { // move menu to volume
-             menu_idx=MENU_VOL;
-           }
-        }
-
       if (Encoderside==enc_leftside)
           { EncLeft_menu_idx=menu_idx; //limit the menu
-            
+          
                }
 
      //limit the changes of the rightside encoder for specific functions
@@ -2002,9 +2043,15 @@ void updateEncoder(uint8_t Encoderside )
       if (menu_idx==MENU_BUTTONL)
       {
         uint8_t currentmode=LeftButton_Next;
+        if (SD_ACTIVE)
+        {
         currentmode+=1;
         LeftButton_Next=currentmode%MODE_MAX; //truncate
-        
+        }
+        else  //no options 
+         { currentmode=MODE_DISPLAY;
+           LeftButton_Next=MODE_DISPLAY;
+         }
       }
       /******************************TIME  ***************/
       if (EncLeft_menu_idx==MENU_TIME)
@@ -2044,6 +2091,7 @@ void updateEncoder(uint8_t Encoderside )
        if ((EncLeft_menu_idx==MENU_PRESET) and (EncLeft_function==enc_value))  
         { preset_idx+=EncLeftchange;
           preset_idx=preset_idx%2;
+          tft.print(preset_idx);
         }
 
 
@@ -2168,6 +2216,11 @@ void updateButtons()
           {
            display_mode+=1;
            display_mode=display_mode%3; //limit to 0(none),1(spectrum),2(waterfall)
+           if (display_mode==no_graph)
+             {  tft.setScroll(0);
+                tft.setRotation( 0 );
+              }
+            
            if (display_mode==waterfallgraph)
               {  tft.setRotation( 0 );
               }
@@ -2176,8 +2229,8 @@ void updateButtons()
                 tft.setRotation( 0 );
               }
              tft.fillScreen(COLOR_BLACK); //blank the screen
-            }
-
+          }
+            
         if (LeftButton_Mode==MODE_PLAY)
           {
             if (playActive==false) //button pressed whilst not playing so start
@@ -2319,6 +2372,7 @@ void setup() {
   #ifdef USETFT
   tft.begin();
   tft.setRotation( 0 );
+  tft.setScroll(0);
   tft.fillScreen(COLOR_BLACK);
   #endif
 //setup Encoder Buttonpins with pullups
@@ -2383,20 +2437,29 @@ void setup() {
   tft.setCursor(20,120);
   tft.println(versionStr);
   tft.println();
+  tft.setFont(Arial_16);
   #ifdef USEEEPROM
-  tft.print("EEprom v");
+  tft.print("EEprom  v:");
   snprintf(tstr,9,"%s",versionEE);
   //tft.println(String(versionEE));
   tft.println(tstr);
-  tft.print("EEprom #");
+  tft.print("  saved #:");
   tft.println(EEsaved_count);
+  if (preset_idx==1)
+  {tft.println("Settings:USER");
+  }
+  else
+  {tft.println("Settings:DEFAULT");
+    }
+  
+
   #endif
   tft.println();
   tft.print("Voltage:");
   tft.println(mv);
   
-  delay(5000); //wait  seconds to clearly show the time
-
+  delay(3000); //wait 3 seconds to clearly show the time
+  tft.fillScreen(COLOR_BLACK);
   tft.setCursor(0, 0);
   tft.setScrollarea(TOP_OFFSET,BOTTOM_OFFSET);
   
