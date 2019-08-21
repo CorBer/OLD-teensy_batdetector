@@ -2,6 +2,10 @@
 Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
 
+Hardware:
+Edwin (PE1WF) has developed a great PCB to build these detectors. More details can be found at https://forum.pjrc.com/threads/38988-Bat-detector?p=212852&viewfull=1#post212852
+
+
 latest changes<br>
 <b> v0.94 important changes:</b>
 - Lower menu format on screen now follows the alignment of the encoders/buttons on Edwins PCB. So the encoders control the lower line on bottom part of the screen(SETTINGS) and the buttons control the upper line on the bottom of the screen (MODES). <br>
