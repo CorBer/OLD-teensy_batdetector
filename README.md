@@ -5,6 +5,17 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 Hardware:
 Edwin (PE1WF) has developed a great PCB to build these detectors. More details can be found at https://forum.pjrc.com/threads/38988-Bat-detector?p=212852&viewfull=1#post212852
 
+*<b> v0.95 MAJOR CHANGES !!!</b>
+- compacted the main menu to have all less often changed settings in a separate SETTINGS page <br>
+- setting of both time and date can be done from the new settings page
+- updated startup from EEprom stored settings (more settings stored (see settings page))<br>
+- improved spectrum-graph functionality (peak-hold now visibible, was present for many versions but invisible) <br>
+
+- made as many as possible user-changeable options cyclic (if the user tries to rotate the encoder above the highest value automatically go to the lowest value) <br>
+- time was updating still on screen every minute during recording, now has been removed
+- added a routine to monitor VIN (or anything else) voltage on A3 (pin17) <br>
+- read unique SN (allows identifying different detectors, one for testing with additional functions) <br>
+
 
 latest changes<br>
 <b> v0.94 important changes:</b>
