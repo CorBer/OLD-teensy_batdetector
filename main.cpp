@@ -37,7 +37,7 @@
 
 
 /* changes 
-* v0.95 MAJOR CHANGES !!!
+* v0.96 MAJOR CHANGES !!!
         - compacted the main menu to have all less often changed settings in a separate SETTINGS page
         - setting of both time and date can be done from the new settings page
         - updated startup from EEprom stored settings (more settings stored (see settings page))
@@ -559,7 +559,7 @@ int preset_idx=1; //0= default values; 1=user values;
 // #define  MENU_PLD   11 //play at original rate
 // #define  MENU_SETTINGS 12 // SETTINGS menu
 
-#define  MENU_MAX 7
+#define  MENU_MAX 6
 
 const int Leftchoices=MENU_MAX+1; //can have any value
 const int Rightchoices=MENU_SR+1; //allow up to SR
@@ -571,7 +571,6 @@ const char* MenuEntry [Leftchoices] =
     "SRate",
     "Record",
     "Play",
-    "PlayR",
     "Settings"
   };
 
@@ -2484,9 +2483,9 @@ void update_Buttons()
     {
       EncLeft_function=!EncLeft_function; 
       
-      
       if ((EncLeft_menu_idx==MENU_SETTINGS)  )   //settings_page 
-          { if (display_mode==settings_page) //leaving settings mode
+          { 
+            if (display_mode==settings_page) //leaving settings mode
               {
                #ifdef DEBUGSERIAL
                 Serial.println("Leave settings menu");
@@ -2502,6 +2501,7 @@ void update_Buttons()
                 #ifdef DEBUGSERIAL
                 Serial.println("Enter settings menu");
                #endif
+
               last_display_mode=display_mode;  
               last_detector_mode=detector_mode;
               display_mode=settings_page; //show the other user-defined settings
