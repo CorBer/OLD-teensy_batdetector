@@ -9,8 +9,8 @@
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
 
-#define batversion "v0.96 20190824"
-#define versionno 96 // used in EEProm storage
+#define batversion "v0.97a 20190824"
+#define versionno 97 // used in EEProm storage
 
 // ***************************** GLOBAL DEFINES
 //#define DEBUGSERIAL
@@ -37,6 +37,8 @@
 
 
 /* changes 
+* v0.97 
+
 * v0.96 MAJOR CHANGES !!!
         - compacted the main menu to have all less often changed settings in a separate SETTINGS page
         - setting of both time and date can be done from the new settings page
@@ -67,7 +69,7 @@
           allready stored files.
 
 * v0.93 minor changes:
-         changing sample_rate was not stored properly in previous versions
+         changing SR was not stored properly in previous versions
         added system-voltage in startup-display (for future battery managment)
 
 * v0.92 -further work on the setup to record/play files NEEDS TESTING 
@@ -198,8 +200,6 @@
                   32 .                .  33
 
 */
-
-
 
 // *************************** LIBRARIES **************************
 
@@ -453,22 +453,22 @@ const char* DP [5] =
 
 // *********************************SAMPLING ****************************
 
-#define SAMPLE_RATE_MIN               0
-#define SAMPLE_RATE_8K                0
-#define SAMPLE_RATE_11K               1
-#define SAMPLE_RATE_16K               2
-#define SAMPLE_RATE_22K               3
-#define SAMPLE_RATE_32K               4
-#define SAMPLE_RATE_44K               5
-#define SAMPLE_RATE_48K               6
-#define SAMPLE_RATE_88K               7
-#define SAMPLE_RATE_96K               8
-#define SAMPLE_RATE_176K              9
-#define SAMPLE_RATE_192K              10
-#define SAMPLE_RATE_234K              11
-#define SAMPLE_RATE_281K              12
-#define SAMPLE_RATE_352K              13
-#define SAMPLE_RATE_MAX               13
+#define SR_MIN               0
+#define SR_8K                0
+#define SR_11K               1
+#define SR_16K               2
+#define SR_22K               3
+#define SR_32K               4
+#define SR_44K               5
+#define SR_48K               6
+#define SR_88K               7
+#define SR_96K               8
+#define SR_176K              9
+#define SR_192K              10
+#define SR_234K              11
+#define SR_281K              12
+#define SR_352K              13
+#define SR_MAX               13
 
 // ***************** SAMPLE RATE DESCRIPTION
 typedef struct SR_Descriptor
@@ -478,33 +478,35 @@ typedef struct SR_Descriptor
 } SR_Desc;
 
 // SRtext and position for the FFT spectrum display scale
-const SR_Descriptor SR [SAMPLE_RATE_MAX + 1] =
+const SR_Descriptor SR [SR_MAX + 1] =
 {
-    {  SAMPLE_RATE_8K,  "8" ,     8000},
-    {  SAMPLE_RATE_11K,  "11",   11025},
-    {  SAMPLE_RATE_16K,  "16",   16000},
-    {  SAMPLE_RATE_22K,  "22",   22050},
-    {  SAMPLE_RATE_32K,  "32",   32000},
-    {  SAMPLE_RATE_44K,  "44",   44100},
-    {  SAMPLE_RATE_48K,  "48",   48000},
-    {  SAMPLE_RATE_88K,  "88",   88200},
-    {  SAMPLE_RATE_96K,  "96",   96000},
-    {  SAMPLE_RATE_176K,  "176", 176400},
-    {  SAMPLE_RATE_192K,  "192", 192000},
-    {  SAMPLE_RATE_234K,  "234", 234000},
-    {  SAMPLE_RATE_281K,  "281", 281000},
-    {  SAMPLE_RATE_352K,  "352", 352800}
+    {  SR_8K,  "8" ,     8000},
+    {  SR_11K,  "11",   11025},
+    {  SR_16K,  "16",   16000},
+    {  SR_22K,  "22",   22050},
+    {  SR_32K,  "32",   32000},
+    {  SR_44K,  "44",   44100},
+    {  SR_48K,  "48",   48000},
+    {  SR_88K,  "88",   88200},
+    {  SR_96K,  "96",   96000},
+    {  SR_176K,  "176", 176400},
+    {  SR_192K,  "192", 192000},
+    {  SR_234K,  "234", 234000},
+    {  SR_281K,  "281", 281000},
+    {  SR_352K,  "352", 352800}
 };
 
 // default samplerates 
 
-int oper_sample_rate = SAMPLE_RATE_281K;
-int rec_sample_rate = SAMPLE_RATE_281K;
-int ply_sample_rate = SAMPLE_RATE_22K;
+#define MAX_PLY_SR SR_44K
 
-int sample_rate_real = SR[oper_sample_rate].freq_real;
-//int last_sample_rate=oper_sample_rate;
-const char * SRtext=SR[oper_sample_rate].txt;
+int oper_SR = SR_281K;
+int rec_SR = SR_281K;
+int ply_SR = SR_22K;
+
+int SR_real = SR[oper_SR].freq_real;
+//int last_SR=oper_SR;
+const char * SRtext=SR[oper_SR].txt;
 
 // ****************************** defaults SETTINGS at startup 
 int startup_display=spectrumgraph;
@@ -785,13 +787,13 @@ void update_display() {
         tft.println(TE_speed);
 
         SETMenu_line(SETMENU_SR);
-        tft.println(SR[oper_sample_rate].txt);
+        tft.println(SR[oper_SR].txt);
 
         SETMenu_line(SETMENU_SR_REC);
-        tft.println(SR[rec_sample_rate].txt);
+        tft.println(SR[rec_SR].txt);
 
         SETMenu_line(SETMENU_SR_PLY);
-        tft.println(SR[ply_sample_rate].txt);
+        tft.println(SR[ply_SR].txt);
 
         SETMenu_line(SETMENU_DISPLAY);
         tft.print(DP[startup_display]);
@@ -878,7 +880,7 @@ void update_display() {
       //     } 
 
        if (EncLeft_menu_idx==MENU_SR)
-          { tft.print(SR[oper_sample_rate].txt);
+          { tft.print(SR[oper_SR].txt);
           }    
        
        if (EncRight_function==enc_value) 
@@ -942,16 +944,16 @@ void update_display() {
     // show a scale with ticks for every 10kHz except for no_graph or settings_page
     if (display_mode!=settings_page)
      {if (display_mode>0)
-      { float x_factor=10000/(0.5*(sample_rate_real / FFT_points));
-        int curF=2*int(freq_real/(sample_rate_real / FFT_points));
+      { float x_factor=10000/(0.5*(SR_real / FFT_points));
+        int curF=2*int(freq_real/(SR_real / FFT_points));
         
-        int maxScale=int(sample_rate_real/20000);
+        int maxScale=int(SR_real/20000);
         for (int i=1; i<maxScale; i++)
         { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
         }
         // detection range
-        int curLo=int(TE_low*1000/(sample_rate_real / FFT_points));
-        int curHi=int(80000/(sample_rate_real / FFT_points));
+        int curLo=int(TE_low*1000/(SR_real / FFT_points));
+        int curHi=int(80000/(SR_real / FFT_points));
         if (detector_mode==detector_Auto_TE) //show detection band
           { tft.drawFastHLine(2*curLo,TOP_OFFSET-SPECTRUMSCALE,2*(curHi-curLo),COLOR_WHITE);
             tft.drawFastHLine(2*curLo,TOP_OFFSET-1,2*(curHi-curLo),COLOR_WHITE);
@@ -1000,14 +1002,14 @@ void       set_freq_Oscillator(int freq) {
     // therefore we have to scale the frequency of the local oscillator
     // in accordance with the REAL sample rate
 
-    freq_Oscillator = (freq) * (AUDIO_SAMPLE_RATE_EXACT / sample_rate_real);
-    //float F_LO2= (freq+5000) * (AUDIO_SAMPLE_RATE_EXACT / sample_rate_real);
+    freq_Oscillator = (freq) * (AUDIO_SAMPLE_RATE_EXACT / SR_real);
+    //float F_LO2= (freq+5000) * (AUDIO_SR_EXACT / SR_real);
     // if we switch to LOWER samples rates, make sure the running LO
     // frequency is allowed ( < 22k) ! If not, adjust consequently, so that
     // LO freq never goes up 22k, also adjust the variable freq_real
     if(freq_Oscillator > 22000) {
       freq_Oscillator = 22000;
-      freq_real = freq_Oscillator * (sample_rate_real / AUDIO_SAMPLE_RATE_EXACT) + 9;
+      freq_real = freq_Oscillator * (SR_real / AUDIO_SAMPLE_RATE_EXACT) + 9;
     }
     AudioNoInterrupts();
     sine1.frequency(freq_Oscillator);
@@ -1060,11 +1062,14 @@ void setI2SFreq(int freq) {
   }
 }
 // ***************************************************** SAMPLE RATE
-void  set_sample_rate (int sr) {
-  sample_rate_real=SR[sr].freq_real;
+void  set_SR (int sr) {
+  #ifdef DEBUGSERIAL
+     Serial.println("change SR");
+  #endif
+  SR_real=SR[sr].freq_real;
   SRtext=SR[sr].txt;
   AudioNoInterrupts();
-  setI2SFreq (sample_rate_real);
+  setI2SFreq (SR_real);
   delay(200); // this delay seems to be very essential !
   set_freq_Oscillator (freq_real);
   AudioInterrupts();
@@ -1123,9 +1128,9 @@ void update_Display(void)
   static int count = TOP_OFFSET;
 
   // lowest frequencybin to detect as a batcall
-  int batCall_LoF_bin= int((TE_low*1000.0)/(sample_rate_real / FFT_points));
+  int batCall_LoF_bin= int((TE_low*1000.0)/(SR_real / FFT_points));
   // highest frequencybin to detect as a batcall
-  int batCall_HiF_bin= int(80000.0/(sample_rate_real / FFT_points));
+  int batCall_HiF_bin= int(80000.0/(SR_real / FFT_points));
 
   uint8_t spec_hi=120; //default 120
   uint8_t spec_lo=2; //default 2
@@ -1203,7 +1208,7 @@ void update_Display(void)
       if ((powerspectrumCounter>50)  )
        { powerspectrumCounter=0;
           int binLo=spec_lo; int binHi=0;
-          float bin2frequency=(sample_rate_real / FFT_points)*0.001;
+          float bin2frequency=(SR_real / FFT_points)*0.001;
          //clear powerspectrumbox
          tft.fillRect(0,TOP_OFFSET-POWERGRAPH-SPECTRUMSCALE,ILI9341_TFTWIDTH,POWERGRAPH, COLOR_BLACK);
          // keep a minimum maximumvalue to the powerspectrum
@@ -1286,7 +1291,7 @@ void update_Display(void)
 
             if (detector_mode==detector_Auto_heterodyne)
                if (since_heterodyne>1000) //update the most every second
-                {freq_real=int((FFT_peakF_bin*(sample_rate_real / FFT_points)/500))*500; //round to nearest 500hz
+                {freq_real=int((FFT_peakF_bin*(SR_real / FFT_points)/500))*500; //round to nearest 500hz
                  set_freq_Oscillator(freq_real);
                  since_heterodyne=0;
                  //granular1.stop();
@@ -1540,7 +1545,7 @@ void changeDetector_mode()
       filemax++;
       //automated filename BA_S.raw where A=file_number and S shows samplerate. Has to fit 8 chars
       // so max is B999_192.raw
-      sprintf(filename, "B%u_%s.raw", filemax, SR[rec_sample_rate].txt);
+      sprintf(filename, "B%u_%s.raw", filemax, SR[rec_SR].txt);
         #ifdef DEBUGSERIAL
         Serial.println('start recording');
         Serial.println(filename);
@@ -1675,7 +1680,7 @@ void changeDetector_mode()
 void startRecording() {
 
   startREC();
-  set_sample_rate(rec_sample_rate); //switch to recording samplerate
+  set_SR(rec_SR); //switch to recording samplerate
   //clear the screen completely
   tft.setScroll(0);
   tft.fillRect(0,0,ILI9341_TFTWIDTH,ILI9341_TFTHEIGHT,COLOR_BLACK);
@@ -1713,7 +1718,7 @@ void continueRecording() {
 // ******************************************************** STOP RECORDING
 void stopRecording() {
   stopREC(&recorder);
-  set_sample_rate(oper_sample_rate); //switch back to operational samplerate
+  set_SR(oper_SR); //switch back to operational samplerate
   //switch on FFT
   tft.fillScreen(COLOR_BLACK);
   mixFFT.gain(0,1);
@@ -1768,9 +1773,10 @@ playActive=true;
 
 //allow settling
   delay(100);
-  //last_sample_rate=sample_rate; //store current samplerate 
-  SR=cyclic_constrain(SR,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
-  set_sample_rate(SR);
+  //last_SR=SR; //store current samplerate 
+  SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
+  set_SR(SR);
+
 #ifdef DEBUGSERIAL
       Serial.println (" Set sample rate done");
 #endif 
@@ -1826,8 +1832,8 @@ void stopPlaying() {
 #endif
   playActive=false;
   
-  // //restore last sample_rate setting
-  set_sample_rate(oper_sample_rate);
+  // //restore last SR setting
+  set_SR(oper_SR);
   
   // freq_real=freq_real_backup;
   // //restore heterodyne frequency
@@ -1849,7 +1855,7 @@ void continuePlaying() {
    {if (!player.isPlaying()) {
      stopPlaying();
     if (continousPlay) //keep playing until stopped by the user
-      { startPlaying(ply_sample_rate); //use the samplerate set by the user
+      { startPlaying(ply_SR); //use the samplerate set by the user
       }
     }
    }
@@ -1874,9 +1880,9 @@ struct config_t {
   uint16_t EEsaved_count;
   int detector_mode;
   int display_mode;
-  int ply_sample_rate;
-  int rec_sample_rate;
-  int oper_sample_rate;
+  int ply_SR;
+  int rec_SR;
+  int oper_SR;
   int8_t mic_gain;
   int8_t volume;
   int freq_real;
@@ -1991,7 +1997,7 @@ boolean EEPROM_LOAD() {
       Serial.print("display ");
       Serial.println(E.display_mode);
       Serial.print("sampleR ");
-      Serial.println(E.oper_sample_rate);
+      Serial.println(E.oper_SR);
       Serial.print("mic_gain ");
       Serial.println(E.mic_gain);
       Serial.print("volume ");
@@ -2009,9 +2015,9 @@ boolean EEPROM_LOAD() {
     
     if (E.preset_idx==1) //user has set preset_idx to default to usersettings
       {
-        ply_sample_rate=E.ply_sample_rate; //replay speed
-        rec_sample_rate=E.rec_sample_rate;
-        oper_sample_rate=E.oper_sample_rate; //sample rate 
+        ply_SR=E.ply_SR; //replay speed
+        rec_SR=E.rec_SR;
+        oper_SR=E.oper_SR; //sample rate 
         preset_idx=E.preset_idx; // default or user settings at startup
         if (preset_idx!=0) 
           {preset_idx=1;} //enforce possible wrong saving
@@ -2060,9 +2066,9 @@ void EEPROM_SAVE() {
   config_t E;
   E.EEsaved_count=EEsaved_count+1; //increase the save counter
   E.BatVersion = versionno;
-  E.ply_sample_rate=ply_sample_rate;
-  E.rec_sample_rate=rec_sample_rate;
-  E.oper_sample_rate=oper_sample_rate;
+  E.ply_SR=ply_SR;
+  E.rec_SR=rec_SR;
+  E.oper_SR=oper_SR;
   E.preset_idx=preset_idx;
   E.detector_mode=startup_detector;
   E.display_mode=startup_display;
@@ -2153,11 +2159,11 @@ void updateEncoder(uint8_t Encoderside )
           AudioInterrupts();
         }
 
-      /******************************MAIN SAMPLE_RATE   ***************/
-      if ((menu_idx==MENU_SR) )  //selects a possible sample_rate
-        { oper_sample_rate+=change;
-          oper_sample_rate=cyclic_constrain(oper_sample_rate,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
-          set_sample_rate(oper_sample_rate);
+      /******************************MAIN SR   ***************/
+      if ((menu_idx==MENU_SR) and (LeftButton_Mode!=MODE_PLAY))  //selects a possible SR but only if we are not in the playing mode
+        { oper_SR+=change;
+          oper_SR=cyclic_constrain(oper_SR,SR_MIN,SR_MAX);
+          set_SR(oper_SR);
           
         }
 
@@ -2200,7 +2206,7 @@ void updateEncoder(uint8_t Encoderside )
 
           freq_real=freq_real+delta*change;
           // limit the frequency to 500hz steps
-          freq_real=cyclic_constrain(freq_real,7000,int(sample_rate_real/2000)*1000-1000);
+          freq_real=cyclic_constrain(freq_real,7000,int(SR_real/2000)*1000-1000);
           set_freq_Oscillator (freq_real);
           lastmillis=millis();
          }
@@ -2234,9 +2240,9 @@ void updateEncoder(uint8_t Encoderside )
              }
           //operational sample rate   
           if (setmenu_pos==SETMENU_SR)
-            { oper_sample_rate+=change;
-              oper_sample_rate=cyclic_constrain(oper_sample_rate,SAMPLE_RATE_MIN,SAMPLE_RATE_MAX);
-              set_sample_rate(oper_sample_rate);
+            { oper_SR+=change;
+              oper_SR=cyclic_constrain(oper_SR,SR_MIN,SR_MAX);
+              set_SR(oper_SR);
               
              }   
           //default display mode   
@@ -2257,13 +2263,13 @@ void updateEncoder(uint8_t Encoderside )
              }      
           //default sampleRate for replay
           if (setmenu_pos==SETMENU_SR_PLY)
-            { ply_sample_rate+=change;
-              ply_sample_rate=cyclic_constrain(ply_sample_rate,SAMPLE_RATE_8K,SAMPLE_RATE_44K);
+            { ply_SR+=change;
+              ply_SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
             }
           //default sampleRate for recording  
           if (setmenu_pos==SETMENU_SR_REC)
-            { rec_sample_rate+=change;
-              rec_sample_rate=cyclic_constrain(rec_sample_rate,SAMPLE_RATE_44K,SAMPLE_RATE_352K);
+            { rec_SR+=change;
+              rec_SR=cyclic_constrain(rec_SR,SR_44K,SR_352K);
             }
           //set time
           if (setmenu_pos==SETMENU_TIME)
@@ -2324,10 +2330,13 @@ void updateEncoder(uint8_t Encoderside )
       /******************************CHANGE PLAY SR   ***************/
       if ((EncLeft_menu_idx==MENU_PLY) and (EncRight_menu_idx==MENU_SR) and (EncRight_function==enc_value))//menu play selected on the left and right
           {if (LeftButton_Mode==MODE_PLAY)
-              {  ply_sample_rate+=EncRightchange;
-                 ply_sample_rate=cyclic_constrain(ply_sample_rate,SAMPLE_RATE_8K,SAMPLE_RATE_44K);
-                 set_sample_rate(ply_sample_rate);
-                 
+              {  ply_SR+=change;
+                 ply_SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
+                 #ifdef DEBUGSERIAL
+                  Serial.println("REnc SR change");
+                 #endif
+                 set_SR(ply_SR);
+                
               }
         }
 
@@ -2454,7 +2463,7 @@ void update_Buttons()
           {
             if (playActive==false) //button pressed whilst not playing so start
               { playActive=true;
-                startPlaying(ply_sample_rate);
+                startPlaying(ply_SR);
               }
               else
               { stopPlaying();
@@ -2532,9 +2541,9 @@ void update_Buttons()
 
        //play menu is active, user is selecting files
         if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) //choose to select values
-         { //keep track of the sample_rate
-           //last_sample_rate=oper_sample_rate; //store the last set sample_rate
-           //sample_rate=ply_sample_rate;
+         { //keep track of the SR
+           //last_SR=oper_SR; //store the last set SR
+           //SR=ply_SR;
            
            LeftButton_Mode=MODE_PLAY; // directly set LEFTBUTTON to play/stop mode
            initPlay(); //switch SD to playing
@@ -2561,8 +2570,8 @@ void update_Buttons()
            #ifdef DEBUGSERIAL
               Serial.println("SD ACTIVE switch back to menu");
            #endif  
-            //restore operational sample_rate setting
-            set_sample_rate(oper_sample_rate);
+            //restore operational SR setting
+            set_SR(oper_SR);
             freq_real=freq_real_backup;
             //restore heterodyne frequency
             set_freq_Oscillator (freq_real);
@@ -2581,7 +2590,7 @@ void update_Buttons()
         if ((EncLeft_function==enc_menu) and (LeftButton_Mode==MODE_PLAY))
           {LeftButton_Mode=MODE_DISPLAY;
            
-           set_sample_rate(oper_sample_rate);
+           set_SR(oper_SR);
            }
                 
      } //END SD_ACTIVE
@@ -2781,7 +2790,7 @@ void setup() {
 
 
 // ***************** SETUP AUDIO *******************************
-set_sample_rate (oper_sample_rate); //set operational sample rate
+set_SR (oper_SR); //set operational sample rate
 set_freq_Oscillator (freq_real);
 inputMixer.gain(0,1); //microphone active
 inputMixer.gain(1,0); //player off
