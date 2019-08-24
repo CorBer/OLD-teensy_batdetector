@@ -9,7 +9,7 @@
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
 
-#define batversion "v0.96 20190823"
+#define batversion "v0.96 20190824"
 #define versionno 96 // used in EEProm storage
 
 // ***************************** GLOBAL DEFINES
@@ -2014,23 +2014,26 @@ boolean EEPROM_LOAD() {
         oper_sample_rate=E.oper_sample_rate; //sample rate 
         preset_idx=E.preset_idx; // default or user settings at startup
         if (preset_idx!=0) 
-          {preset_idx=1;}
+          {preset_idx=1;} //enforce possible wrong saving
         detector_mode=E.detector_mode; // detector mode
-        display_mode=E.display_mode;
+        startup_detector=detector_mode;
+        display_mode=E.display_mode; //display mode
+        startup_display=display_mode;
+
         if (display_mode==no_graph)
              {  tft.setScroll(0);
                 tft.setRotation( 0 );
               }
-            
-           if (display_mode==waterfallgraph)
+        if (display_mode==waterfallgraph)
               {  tft.setRotation( 0 );
               }
-           if (display_mode==spectrumgraph)
+        if (display_mode==spectrumgraph)
              {  tft.setScroll(0);
                 tft.setRotation( 0 );
               }
-             tft.fillScreen(COLOR_BLACK); //blank the screen
-         tft.print(display_mode);    
+        tft.fillScreen(COLOR_BLACK); //blank the screen
+
+        tft.print(display_mode);    
         TE_speed=E.TE_speed; //replay speed for TE
         TE_low=E.TE_low; //low frequency for TE
         freq_real=E.freq_real; // set centre frequency
