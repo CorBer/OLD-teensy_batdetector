@@ -9,8 +9,8 @@
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
 
-#define batversion "v0.97a 20190824"
-#define versionno 97 // used in EEProm storage
+#define batversion "v0.96a 20190824"
+#define versionno 96 // used in EEProm storage
 
 // ***************************** GLOBAL DEFINES
 //#define DEBUGSERIAL
