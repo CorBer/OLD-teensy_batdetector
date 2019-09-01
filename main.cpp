@@ -563,22 +563,11 @@ int preset_idx=1; //0= default values; 1=user values;
 #define  MENU_FRQ   2 //frequency
 #define  MENU_SR    3 //sample rate
 #define  MENU_REC   4 //record
-#define  MENU_PLY  5 //play
-//#define  MENU_PLD   6 //play at original rate
-#define  MENU_SETTINGS 6 // SETTINGS menu
+#define  MENU_PLAY  5 //play
+#define  MENU_PLD   6 //play at original rate
+#define  MENU_SETTINGS 7 // SETTINGS menu
 
-// #define  MENU_DNS   4 //denoise
-// #define  MENU_PRESET 5
-// #define  MENU_BUTTONL   6 //set function for buttonL
-// #define  MENU_TIME  7
-
-// #define MENU_TES 8 // auto_te speed
-// #define MENU_TEL 9 // auto_te lowest freq
-// #define  MENU_PLY  10 //play
-// #define  MENU_PLD   11 //play at original rate
-// #define  MENU_SETTINGS 12 // SETTINGS menu
-
-#define  MENU_MAX 6
+#define  MENU_MAX MENU_SETTINGS
 
 const int Leftchoices=MENU_MAX+1; //can have any value
 const int Rightchoices=MENU_SR+1; //allow up to SR
@@ -590,6 +579,7 @@ const char* MenuEntry [Leftchoices] =
     "SRate", 
     "Record", //only L
     "Play",
+    "PlayD",
     "Settings"
   };
 
@@ -657,6 +647,7 @@ int last_detector_mode=detector_heterodyne;
 
 // ***************************** FFT SETUP *******************************
 
+long FFT_count=0;
 int idx_t = 0;
 int idx = 0;
 int64_t sum;
@@ -680,8 +671,6 @@ int index_u_limit;
 const uint16_t FFT_points = 256;
 int barm [512];
 
-// setup for FFTgraph denoising
-uint32_t FFTcount=0; //count the # of FFTs done
 uint16_t powerspectrumCounter=0;
 
 float FFTavg[128];
@@ -909,7 +898,7 @@ void update_display() {
         { tft.setTextColor(ENC_MENU_COLOR);
          }
       
-       if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) // when play selected only show filename
+       if ((EncLeft_menu_idx==MENU_PLAY) and (EncLeft_function==enc_value)) // when play selected only show filename
            { 
              #ifdef USESD
              char* ch = strchr(filelist[fileselect], '.');
@@ -1025,6 +1014,10 @@ void update_display() {
           { tft.drawFastHLine(2*curLo,TOP_OFFSET-SPECTRUMSCALE,2*(curHi-curLo),COLOR_WHITE);
             tft.drawFastHLine(2*curLo,TOP_OFFSET-1,2*(curHi-curLo),COLOR_WHITE);
           }
+
+        if (curF<ILI9341_TFTWIDTH-40)
+          {
+          
         tft.fillCircle(curF,TOP_OFFSET-3,3,ENC_MENU_COLOR);
                 
         if (display_mode==spectrumgraph)
@@ -1033,6 +1026,7 @@ void update_display() {
             snprintf(tstr,9, "%02d", int(osc_frequency/1000));
             tft.setCursor(curF-10,TOP_OFFSET-30);  
             tft.print(tstr);
+          }
           }
       }
       else 
@@ -1193,7 +1187,7 @@ void update_Display(void)
  if (myFFT.available()) {
   const uint16_t Y_OFFSET = TOP_OFFSET;
   static int count = TOP_OFFSET;
-
+  
   // lowest frequencybin to detect as a batcall
   int batCall_LoF_bin= int((TE_low*1000.0)/(SR_real / FFT_points));
   // highest frequencybin to detect as a batcall
@@ -1205,13 +1199,12 @@ void update_Display(void)
 
   uint16_t FFT_pixels[240]; // maximum of 240 pixels, each one is the result of one FFT
   memset(FFT_pixels,0,sizeof(FFT_pixels)); //blank the pixels
-
-    FFTcount++;
-  
+ 
     int FFT_peakF_bin=0;
     int peak=256;
     int avgFFTbin=0;
     // there are 128 FFT different bins only 120 are shown on the graphs
+    FFT_count++;
     for (int i = spec_lo; i < spec_hi; i++) {
       int val = myFFT.output[i]*10 + 10; //v1
       avgFFTbin+=val;
@@ -1259,13 +1252,14 @@ void update_Display(void)
     }
  
     if (display_mode==spectrumgraph)
-        { if (detector_mode==detector_Auto_TE)
-            {  if(powerspectrumCounter%5==0) //update the spectrum every 5th sample
-                    { spectrum();
-                    }
-            }
+         { 
+         if (detector_mode==detector_Auto_TE)
+            {  if(FFT_count%5==0) //update the spectrum every 5th sample
+                     { spectrum();
+                     }
+             }
           else
-          { if(FFTcount%2==0) //update the spectrum every 2nd sample
+          { if(FFT_count%2==0) //update the spectrum every 2nd sample
                 spectrum();
           }
         }   
@@ -2148,10 +2142,10 @@ void updateEncoder(uint8_t Encoderside )
 
        //remove functionality when SD is not active, so no SDCARD mounted or SDCARD is unreadable
       if (!SD_ACTIVE)
-        { if ((menu_idx==MENU_PLY) or (menu_idx==MENU_REC) )
+        { if ((menu_idx==MENU_PLAY) or (menu_idx==MENU_REC) )
            { // move menu to next available option
            if (change==1) 
-             {menu_idx=MENU_PLY+1; }
+             {menu_idx=MENU_PLAY+1; }
            if (change==-1)
              {menu_idx=MENU_REC-1;}
              
@@ -2198,11 +2192,7 @@ void updateEncoder(uint8_t Encoderside )
          mic_gain+=change;
          mic_gain=constrain(mic_gain,0,63);
          set_mic_gain(mic_gain);
-         FFTcount=0; //always start denoise after changing gain
-         //reset FFTdenoise array
-         {for (int16_t i = 0; i < 128; i++) {
-           FFTavg[i]=0;}
-         }
+         
         }
       /******************************FREQUENCY  ***************/
       if (menu_idx==MENU_FRQ)
@@ -2339,7 +2329,7 @@ void updateEncoder(uint8_t Encoderside )
   
 
       /******************************SELECT A FILE  ***************/
-      if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value))//menu selected file to be played
+      if ((EncLeft_menu_idx==MENU_PLAY) and (EncLeft_function==enc_value))//menu selected file to be played
          {  
            #ifdef USESD
            fileselect+=EncLeftchange;
@@ -2349,7 +2339,7 @@ void updateEncoder(uint8_t Encoderside )
          }
 
       /******************************CHANGE PLAY SR   ***************/
-      if ((EncLeft_menu_idx==MENU_PLY) and (EncRight_menu_idx==MENU_SR) and (EncRight_function==enc_value))//menu play selected on the left and right
+      if ((EncLeft_menu_idx==MENU_PLAY) and (EncRight_menu_idx==MENU_SR) and (EncRight_function==enc_value))//menu play selected on the left and right
           {if ((LeftButton_Mode==MODE_PLAY))
               {  ply_SR+=EncRightchange;
                  ply_SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
@@ -2568,7 +2558,7 @@ void update_Buttons()
            } 
 
        //play menu is active, user is selecting files
-        if ((EncLeft_menu_idx==MENU_PLY) and (EncLeft_function==enc_value)) //choose to select values
+        if ((EncLeft_menu_idx==MENU_PLAY) and (EncLeft_function==enc_value)) //choose to select values
          { //keep track of the SR
            //last_SR=oper_SR; //store the last set SR
            //SR=ply_SR;
@@ -2665,8 +2655,8 @@ void setup() {
   delay(5000); //wait 5 seconds 
  #endif
 
- #if USE_PWMTFT
-    analogWrite(3,200); //put screen always at low power
+ #ifdef USE_PWMTFT
+    analogWrite(3,10); //put screen always at low power
  #endif
 
   #ifdef USETFT
