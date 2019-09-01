@@ -5,6 +5,11 @@ https://github.com/DD4WH/Teensy-Bat-Detector )
 <b>Hardware:</b>
 Edwin (PE1WF) has developed a great PCB to build these detectors. More details can be found at https://forum.pjrc.com/threads/38988-Bat-detector?p=212852&viewfull=1#post212852
 
+<b>* v0.97/0.98 </b> fixed bug in the replay mode: when choosing a file the replay-sample_rate changed also
+-added routines to monitor VIN (A3 ADC on pin17 using a voltage divider and capacitor) see #define USE_VIN_ADC
+-added routine to control TFT PWM from pin3, see #define USE_PWMTFT
+-added compiler option PIO (platformiobased project) or ARDUINO (teensyduino/arduino IDE) 
+
 *<b> v0.96 (20190824) MAJOR CHANGES </b>
 - compacted the main menu to have all less often changed settings in a separate SETTINGS page <br>
 - setting of both time and date can be done from the new settings page
