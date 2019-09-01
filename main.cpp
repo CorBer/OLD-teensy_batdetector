@@ -8,36 +8,49 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
+/* CORBEE */
+/* TEENSY 3.6 PINSETUP (20180901)
+                 GND *                * Vin  - PREAMP V+  ----------------------R
+                   0 .                *  Analog GN D      --------C-----R       R1
+                   1 .                *  3.3V - MEMS MIC          C1    R2      R1
+                   2 .                *  23 AUDIO -LRCLK          C1    R2      R1
+       TFT-PWM     3 .                *  22 AUDIO -TX             C1    R2      R1  voltage dividor R2/(R1+R2) 
+                   4 .                *  21 TFT CS                C1    R2      R1  
+                   5 .                *  20 TFT DC                C1    R2      R1  
+       AUDIO MEMCS 6 *                *  19 AUDIO - SCL           C1    R2      R1  ex. R1=15k, R2=2.2k C1=100nf(https://forum.pjrc.com/threads/25111-Decreasing-noise-on-Teensy-ADC) 
+       AUDIO MOSI  7 *                *  18 AUDIO - SDA           C1    R2      R1
+                   8 .                .  17 A3 - ADC -    --------C-----R-------R  
+       AUDIO BCLK  9 *                .  16                                
+       AUDIO SDCS 10 *                *  15 AUDIO -VOL                      
+       AUDIO MCLK 11 *                *  14 AUDIO -SCLK                     
+       AUDIO MISO 12 *                *  13 AUDIO -RX                       
+                3.3V *                *  GND                 
+                  24 .                .  A22
+                  25 .                .  A21
+                  26 .                *  39  TFT MISO
+        TFT SCLK  27 *                *  38  MICROPUSH_L
+        TFT MOSI  28 *                *  37  MICROPUSH_R
+     ENC_L-BUTTON 29 *                *  36  ENC_R-BUTTON
+     ENC_L A      30 *                *  35  ENC_R A
+     ENC_L B      31 *                *  34  ENC_R B
+                  32 .                .  33
 
-#define batversion "v0.96a 20190824"
-#define versionno 96 // used in EEProm storage
+*/
 
-// ***************************** GLOBAL DEFINES
-//#define DEBUGSERIAL
+#define batversion "v0.98 20190901"
+#define versionno 97 // used in EEProm storage
+//PIO (platformio) or ARDUINO environment 
+#define COMPILER PIO
 
-#include <Arduino.h>
-#ifndef __MKL26Z64__
-	// only SIM_UIDML will probably change !!
-  unsigned long chipNum[4] = { SIM_UIDH, SIM_UIDMH, SIM_UIDML, SIM_UIDL };
-  
-#else
-	unsigned long chipNum[4] = { 0L, SIM_UIDMH, SIM_UIDML, SIM_UIDL };
-#endif
-
-//USE a TFT (this code will not function properly without !!! Currently only setup for ILI9341 )
-#define USETFT
-
-#define USESD
-#define USESD1
-
-#define USERECORD //allows to remove recording section from software (used for testing )
-#define USEEEPROM //allows to remove EEprom section (used for testing)
-
-/* TODO: find a way to only activate the SD when necessary and shut it down at other times to keep the background sounds low */
-
+#define USE_VIN_ADC
+//#define USE_PWMTFT
+//#define DEBUG_SERIAL
 
 /* changes 
-* v0.97 
+* v0.97/0.98 fixed bug in the replay mode: when choosing a file the replay-sample_rate changed also
+        added routines to monitor VIN (A3 ADC on pin17 using a voltage divider and capacitor) see #define USE_VIN_ADC
+        added routine to control TFT PWM from pin3, see #define USE_PWMTFT
+        added compiler option PIO (platformiobased project) or ARDUINO (teensyduino/arduino IDE) 
 
 * v0.96 MAJOR CHANGES !!!
         - compacted the main menu to have all less often changed settings in a separate SETTINGS page
@@ -170,40 +183,32 @@
  *
  **********************************************************************/
 
-/* CORBEE */
-/* TEENSY 3.6 PINSETUP (20180814)
-  CHANGED 20190820 added usage of pin 17 for VCC monitoring via ADC (A3)
+#include <Arduino.h>
+#ifndef __MKL26Z64__
+	// only SIM_UIDML will probably change !!
+  unsigned long chipNum[4] = { SIM_UIDH, SIM_UIDMH, SIM_UIDML, SIM_UIDL };
+#else
+	unsigned long chipNum[4] = { 0L, SIM_UIDMH, SIM_UIDML, SIM_UIDL };
+#endif
 
-                 GND *                * Vin  - PREAMP V+
-                   0 .                *   Analog GND
-                   1 .                *  3.3V - MEMS MIC
-                   2 .                *  23 AUDIO -LRCLK
-                   3 .                *  22 AUDIO -TX
-                   4 .                *  21 TFT CS
-                   5 .                *  20 TFT DC
-       AUDIO MEMCS 6 *                *  19 AUDIO - SCL
-       AUDIO MOSI  7 *                *  18 AUDIO - SDA
-                   8 .                .  17 A3 - ADC - VIN/2
-       AUDIO BCLK  9 *                .  16
-       AUDIO SDCS 10 *                *  15 AUDIO -VOL
-       AUDIO MCLK 11 *                *  14 AUDIO -SCLK
-       AUDIO MISO 12 *                *  13 AUDIO -RX
-                3.3V *                *  GND
-                  24 .                .  A22
-                  25 .                .  A21
-                  26 .                *  39  TFT MISO
-        TFT SCLK  27 *                *  38  MICROPUSH_L
-        TFT MOSI  28 *                *  37  MICROPUSH_R
-     ENC_L-BUTTON 29 *                *  36  ENC_R-BUTTON
-     ENC_L A      30 *                *  35  ENC_R A
-     ENC_L B      31 *                *  34  ENC_R B
-                  32 .                .  33
 
-*/
+//USE a TFT (this code will not function properly without !!! Currently only setup for ILI9341 )
+#define USETFT
+
+#define USESD
+#define USESD1
+
+#define USERECORD //allows to remove recording section from software (used for testing )
+#define USEEEPROM //allows to remove EEprom section (used for testing)
 
 // *************************** LIBRARIES **************************
+#if COMPILER==PIO
+  #include <TimeLib.h>
+#endif
+#if COMPILER==ARDUINO
+  #include <TimeAltLib.h>
+#endif
 
-#include <TimeLib.h>
 #include "Audio.h"
 #include <SPI.h>
 #include <Bounce.h>
@@ -239,6 +244,8 @@ int helpmonth;
 int helpyear;
 int helpsec;
 uint8_t old_time_min=0;
+uint8_t old_time_sec=0;
+
 
 uint8_t hour10_old;
 uint8_t hour1_old;
@@ -384,6 +391,7 @@ uint8_t RightButton_Mode=MODE_DETECT;
 AudioInputI2S                    i2s_in; // MIC input
 AudioRecordQueue                 recorder;
 AudioSynthWaveformSineHires      sine1; // local oscillator
+//AudioFilterBiquad                BiQuad1;
 AudioEffectMultiply              heterodyne_multiplier; // multiply = mix
 AudioAnalyzeFFT256               myFFT; // for spectrum display
 AudioPlaySdRaw                   player;
@@ -393,17 +401,21 @@ AudioMixer4                      mixFFT;
 AudioMixer4                      outputMixer; //selective output
 AudioMixer4                      inputMixer; //selective input
 AudioOutputI2S                   i2s_out; // headphone output
+
+//AudioConnection mic_BiQuad          (i2s_in, 0, BiQuad1, 0); //microphone signal
 AudioConnection mic_toinput         (i2s_in, 0, inputMixer, 0); //microphone signal
+//AudioConnection BiQuad_toinput      (BiQuad1, 0, inputMixer, 2); //microphone signal
+
 AudioConnection mic_torecorder      (i2s_in, 0, recorder, 0); //microphone signal
 AudioConnection player_toinput      (player, 0, inputMixer, 1); //player signal
 AudioConnection input_toswitch      (inputMixer,0,  mixFFT,0);
 AudioConnection input_todelay       (inputMixer,0, granular1, 0);
 AudioConnection switch_toFFT        (mixFFT,0, myFFT,0 ); //raw recording channel
 AudioConnection input_toheterodyne1 (inputMixer, 0, heterodyne_multiplier, 0); //heterodyne 1 signal
-AudioConnection sineheterodyne1    (sine1, 0, heterodyne_multiplier, 1);//heterodyne 1 mixerfreq
-AudioConnection granular_toout (granular1,0, outputMixer,1);
-AudioConnection heterodyne1_toout      (heterodyne_multiplier, 0, outputMixer, 0);  //heterodyne 1 output to outputmixer
-AudioConnection player_toout           (inputMixer,0, outputMixer, 2);    //direct signal (use with player) to outputmixer
+AudioConnection sineheterodyne1     (sine1, 0, heterodyne_multiplier, 1);//heterodyne 1 mixerfreq
+AudioConnection granular_toout      (granular1,0, outputMixer,1);
+AudioConnection heterodyne1_toout   (heterodyne_multiplier, 0, outputMixer, 0);  //heterodyne 1 output to outputmixer
+AudioConnection player_toout        (inputMixer,0, outputMixer, 2);    //direct signal (use with player) to outputmixer
 AudioConnection output_toheadphoneleft      (outputMixer, 0, i2s_out, 0); // output to headphone
 AudioConnection output_toheadphoneright     (outputMixer, 0, i2s_out, 1);
 
@@ -474,7 +486,7 @@ const char* DP [5] =
 typedef struct SR_Descriptor
 {   const int SR_n;
     const char* txt; //text for the display
-    const u_int freq_real;
+    const u_int osc_frequency;
 } SR_Desc;
 
 // SRtext and position for the FFT spectrum display scale
@@ -504,7 +516,7 @@ int oper_SR = SR_281K;
 int rec_SR = SR_281K;
 int ply_SR = SR_22K;
 
-int SR_real = SR[oper_SR].freq_real;
+int SR_real = SR[oper_SR].osc_frequency;
 //int last_SR=oper_SR;
 const char * SRtext=SR[oper_SR].txt;
 
@@ -517,8 +529,8 @@ int8_t volume=50;
 //int8_t TE_speed=20; // moved to EEprom section
 //int8_t TE_low=15 ; //move to EEprom section
 
-int freq_real = 45000; // start heterodyne detecting at this frequency
-int freq_real_backup=freq_real; //used to return to proper listening setting after using the play_function
+int osc_frequency = 45000; // start heterodyne detecting at this frequency
+int last_osc_frequency=osc_frequency; //used to return to proper listening setting after using the play_function
 float freq_Oscillator =50000;
 
 int16_t EEsaved_count=0;
@@ -527,6 +539,11 @@ int8_t TE_low=15 ;
 int8_t param=10;
 
 int preset_idx=1; //0= default values; 1=user values;
+#ifdef USE_VIN_ADC
+  int VIN=0; //VIN from ADC
+  #include <ADC.h>
+  ADC *adc = new ADC();
+#endif
 
 // *********************************************  SPECIAL FUNCTIONS
 //adapted constrain function to allow cycling values initial functioncopied from wiring.h
@@ -567,11 +584,11 @@ const int Leftchoices=MENU_MAX+1; //can have any value
 const int Rightchoices=MENU_SR+1; //allow up to SR
 const char* MenuEntry [Leftchoices] =
   {
-    "Vol.",
+    "Vol.",  //L and R
     "Gain",
     "Freq.",
-    "SRate",
-    "Record",
+    "SRate", 
+    "Record", //only L
     "Play",
     "Settings"
   };
@@ -592,9 +609,10 @@ int setmenu_pos=0;
 #define SETMENU_SR_PLY 8 //Sample Rate
 #define SETMENU_TIME  9
 #define SETMENU_DATE 10
+#define SETMENU_PARAM 11
 
 #define SETMENU_MIN 0
-#define SETMENU_MAX 10  // MAXIMIZE AT 11 !!!! with ARIAL 16
+#define SETMENU_MAX 11 // MAXIMIZE AT 10 !!!! with ARIAL 16
 
 const char* SetMenuEntry [SETMENU_MAX+1] =
   {
@@ -603,13 +621,16 @@ const char* SetMenuEntry [SETMENU_MAX+1] =
     "Settings ", //read the settings from EEprom or use the defaults
     "Encoder ",
     "TExp Lowest Frq ",
-    "TExp Replay Spd 1/",
+    "TExp Replay Spd ",
     "SampleRate ",
     "SampleRate rec ",
     "SampleRate play ",
     "Time ",
-    "yyyyymmdd "
+    "yyyyymmdd ",
+    "param"
+
   };
+
 
 //***************************************** available DETECTOR modes
 #define detector_heterodyne 0
@@ -684,16 +705,18 @@ int calc_menu_dxoffset(const char* str)  // to position the menu on the right sc
 }
 
 //SETTINGS MENU STARTS at TOP_OFFSET-45 (currently at 45) and uses 20 pixels/line. The bottom should be above BOTTOM_OFFSET (320-40=280) so
-// there is space for 280-45=245/20=12 lines with Arial_16
+// there is space for 280-45=245/20=12 lines with Arial_14
 // goto a menuline on screen and clear it if its selected
+
+
 void SETMenu_line(int line) // position the cursor, clear the line if this is an active menuline or otherwise just display the text
                             // TODO: optimize to only update the necessary lines instead of rewriting all
-        {
-          tft.setCursor(0,TOP_OFFSET-45+line*20);
+        { 
+          int h = Arial_14.cap_height+3;
+          tft.setCursor(0,TOP_OFFSET-45+line*h);
           if (line==setmenu_pos)
             {tft.setTextColor(COLOR_WHITE);
-             tft.fillRect(0,TOP_OFFSET-45+line*20,240,20,COLOR_BLACK);
-             
+             tft.fillRect(0,TOP_OFFSET-45+line*h,240,h,COLOR_BLACK);
             }
           else
           { tft.setTextColor(COLOR_YELLOW);
@@ -702,6 +725,13 @@ void SETMenu_line(int line) // position the cursor, clear the line if this is an
          
         }
 
+void showMenu_value(const char *str)
+        {
+          uint16_t dx=calc_menu_dxoffset(str);
+          int y=tft.getCursorY();
+          tft.setCursor(ILI9341_TFTWIDTH-dx,y);
+          tft.print(str);
+        }
 //**************************************  MAIN DISPLAY UPDATE 
 void update_display() {
   #ifdef USETFT
@@ -729,7 +759,7 @@ void update_display() {
     tft.print("v"); tft.print(volume);
     tft.print(" g"); tft.print(mic_gain);
     if (display_mode==waterfallgraph)
-       {tft.print(" f"); tft.print(int(freq_real/1000));
+       {tft.print(" f"); tft.print(int(osc_frequency/1000));
        }
     tft.print(" s"); tft.print(SRtext);
 
@@ -756,69 +786,106 @@ void update_display() {
         tft.print("error");
      }
       
+      char tstr[9];
+      
+      
+      #ifdef USE_VIN_ADC
+      tft.setCursor(180,0);
+      if (VIN<4500) 
+            { snprintf(tstr,9, "L%4d", VIN-3700);
+        tft.print(tstr);
+      }
+      else
+      {
+         tft.print("USB");
+      }
+      
+      #endif
+
       tft.setCursor(180,20);
       struct tm tx = seconds2time(RTC_TSR);
-      char tstr[9];
+      
       tft.setTextColor(ENC_MENU_COLOR);
       //if the user is editing the time show seconds also
       snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
       tft.print(tstr);
 
+    
+
     // *********************** SETTINGS PAGE ****************************
     if (display_mode==settings_page) // display user settings
       { 
         //position just below the top  
+
         tft.setCursor(0,TOP_OFFSET-45);
         tft.setTextColor(COLOR_YELLOW); //default color
-        tft.setFont(Arial_16); //default font allows 12 lines of settings
+        tft.setFont(Arial_14); //default font allows 12 lines of settings
         
         setmenu_pos=cyclic_constrain(setmenu_pos,SETMENU_MIN,SETMENU_MAX);
-        
+        char tstr[9];
+
         SETMenu_line(SETMENU_ENC);
         if (ENCODER_TURN==1)
-          {tft.println(" Clockwise"); }
+          { snprintf(tstr,9, "Clockw");
+          }
         else
-           { tft.println(" C-Clockwise"); }
+           {snprintf(tstr,9, "C-Clockw");
+           }
+        showMenu_value(tstr);
+         
+
 
         SETMenu_line(SETMENU_TE_LOW);
-        tft.println(TE_low);
-
+        snprintf(tstr,9, "%02d", TE_low);
+        showMenu_value(tstr);
+      
         SETMenu_line(SETMENU_TE_SPD);
-        tft.println(TE_speed);
+        snprintf(tstr,9, "1/%02d", TE_speed);
+        showMenu_value(tstr);
 
         SETMenu_line(SETMENU_SR);
-        tft.println(SR[oper_SR].txt);
+        showMenu_value(SR[oper_SR].txt);
+        //tft.println(SR[oper_SR].txt);
 
         SETMenu_line(SETMENU_SR_REC);
-        tft.println(SR[rec_SR].txt);
+        showMenu_value(SR[rec_SR].txt);
 
         SETMenu_line(SETMENU_SR_PLY);
-        tft.println(SR[ply_SR].txt);
+        showMenu_value(SR[ply_SR].txt);
 
         SETMenu_line(SETMENU_DISPLAY);
-        tft.print(DP[startup_display]);
+        showMenu_value(DP[startup_display]);
 
         SETMenu_line(SETMENU_DETECTOR);
-        tft.print(DT[startup_detector]);
+        showMenu_value(DT[startup_detector]);
 
         SETMenu_line(SETMENU_TIME);
-        char tstr[9];
+        
         struct tm tx = seconds2time(RTC_TSR);
         snprintf(tstr,9, "%02d:%02d:%02d", tx.tm_hour, tx.tm_min, tx.tm_sec);
-        tft.print(tstr);
+        showMenu_value(tstr);
+        //tft.print(tstr);
         
         SETMenu_line(SETMENU_DATE);
         tx = seconds2time(RTC_TSR);
         snprintf(tstr,9, "%04d%02d%02d", tx.tm_year+1970, tx.tm_mon, tx.tm_mday);
-        tft.print(tstr);
+        showMenu_value(tstr);
+        //tft.print(tstr);
         
         SETMenu_line(SETMENU_STARTUPMODE);
         if (preset_idx==0)
-             {tft.print("DEFAULTS");}
+             {snprintf(tstr,9, "Default");
+              }
              else
-             {tft.print("EEPROM");
+             {snprintf(tstr,9, "EEprom");
                 };
-      
+        showMenu_value(tstr);
+
+        SETMenu_line(SETMENU_PARAM);
+        snprintf(tstr,9, "%04d", param);
+        showMenu_value(tstr);
+
+        
       }  
     
      //BOTTOM PART OF SCREEN      
@@ -865,7 +932,7 @@ void update_display() {
           } 
 
        if (EncLeft_menu_idx==MENU_FRQ)
-          { tft.print(int(freq_real/1000));
+          { tft.print(int(osc_frequency/1000));
           } 
        if (EncLeft_menu_idx==MENU_VOL)
           { tft.print(volume);
@@ -945,7 +1012,7 @@ void update_display() {
     if (display_mode!=settings_page)
      {if (display_mode>0)
       { float x_factor=10000/(0.5*(SR_real / FFT_points));
-        int curF=2*int(freq_real/(SR_real / FFT_points));
+        int curF=2*int(osc_frequency/(SR_real / FFT_points));
         
         int maxScale=int(SR_real/20000);
         for (int i=1; i<maxScale; i++)
@@ -963,7 +1030,7 @@ void update_display() {
         if (display_mode==spectrumgraph)
           { //tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
             char tstr[9];
-            snprintf(tstr,9, "%02d", int(freq_real/1000));
+            snprintf(tstr,9, "%02d", int(osc_frequency/1000));
             tft.setCursor(curF-10,TOP_OFFSET-30);  
             tft.print(tstr);
           }
@@ -1006,10 +1073,10 @@ void       set_freq_Oscillator(int freq) {
     //float F_LO2= (freq+5000) * (AUDIO_SR_EXACT / SR_real);
     // if we switch to LOWER samples rates, make sure the running LO
     // frequency is allowed ( < 22k) ! If not, adjust consequently, so that
-    // LO freq never goes up 22k, also adjust the variable freq_real
+    // LO freq never goes up 22k, also adjust the variable osc_frequency
     if(freq_Oscillator > 22000) {
       freq_Oscillator = 22000;
-      freq_real = freq_Oscillator * (SR_real / AUDIO_SAMPLE_RATE_EXACT) + 9;
+      osc_frequency = freq_Oscillator * (SR_real / AUDIO_SAMPLE_RATE_EXACT) + 9;
     }
     AudioNoInterrupts();
     sine1.frequency(freq_Oscillator);
@@ -1063,15 +1130,15 @@ void setI2SFreq(int freq) {
 }
 // ***************************************************** SAMPLE RATE
 void  set_SR (int sr) {
-  #ifdef DEBUGSERIAL
+  #ifdef DEBUG_SERIAL
      Serial.println("change SR");
   #endif
-  SR_real=SR[sr].freq_real;
+  SR_real=SR[sr].osc_frequency;
   SRtext=SR[sr].txt;
   AudioNoInterrupts();
   setI2SFreq (SR_real);
   delay(200); // this delay seems to be very essential !
-  set_freq_Oscillator (freq_real);
+  set_freq_Oscillator (osc_frequency);
   AudioInterrupts();
   delay(20);
   update_display();
@@ -1291,8 +1358,8 @@ void update_Display(void)
 
             if (detector_mode==detector_Auto_heterodyne)
                if (since_heterodyne>1000) //update the most every second
-                {freq_real=int((FFT_peakF_bin*(SR_real / FFT_points)/500))*500; //round to nearest 500hz
-                 set_freq_Oscillator(freq_real);
+                {osc_frequency=int((FFT_peakF_bin*(SR_real / FFT_points)/500))*500; //round to nearest 500hz
+                 set_freq_Oscillator(osc_frequency);
                  since_heterodyne=0;
                  //granular1.stop();
                 }
@@ -1371,13 +1438,15 @@ void setMixer(int mode)
 //  ********************************************* MAIN MODE CHANGE ROUTINE *************************
 void changeDetector_mode()
 {
-  #ifdef DEBUGSERIAL
+  #ifdef DEBUG_SERIAL
     Serial.print("Changedetector ");
 
     Serial.println(detector_mode);
   #endif    
   if (detector_mode==detector_heterodyne)
          { granular1.stop(); //stop other detecting routines
+           osc_frequency=last_osc_frequency;
+           set_freq_Oscillator (osc_frequency);
            setMixer(heterodynemixer);
            //switch menu to volume/frequency
            EncLeft_menu_idx=MENU_VOL;
@@ -1455,7 +1524,7 @@ void changeDetector_mode()
                  {filemax=num;}
                         
              //tft.println(entry.name());
-             #ifdef DEBUGSERIAL
+             #ifdef DEBUG_SERIAL
               Serial.println(filelist[filecounter]);
             #endif
             filecounter++;
@@ -1487,14 +1556,7 @@ void changeDetector_mode()
   FATFS fatfs;      /* File system object */
   FIL fil;        /* File object */
 
-  // forward declaration Stop recording with message
-  void die(char *str, FRESULT rc)
-  {
-    #ifdef DEBUGSERIAL
-    //Serial.printf("%s: Failed with rc = %s.\n", str, FR_ERROR_STRING[rc]); for (;;) delay(100);
-    #endif
-   }
-
+  
   //uint32_t count=0;
   uint32_t ifn=0;
   uint32_t isFileOpen=0;
@@ -1516,14 +1578,10 @@ void changeDetector_mode()
   void initREC(void)
   { const char *Device = "1:/";  // 0: SPI 1;SDIO 2:MSC
     rc = f_mount (&fatfs, Device, 1);      /* Mount a logical drive */
-    #ifdef DEBUGSERIAL
-      if (rc) die("close", rc);
-    #endif
+    
       
     rc = f_chdrive(Device);
-    #ifdef DEBUGSERIAL
-      if((rc)) die("chdrive",rc);
-   #endif
+    
   }
 // ************** //
   void startREC(void)
@@ -1533,9 +1591,7 @@ void changeDetector_mode()
     if(isFileOpen)
     { //close file
       rc = f_close(&fil);
-      #ifdef DEBUGSERIAL
-      if (rc) die("close", rc);
-      #endif
+     
       isFileOpen=0;
     }
 
@@ -1546,16 +1602,16 @@ void changeDetector_mode()
       //automated filename BA_S.raw where A=file_number and S shows samplerate. Has to fit 8 chars
       // so max is B999_192.raw
       sprintf(filename, "B%u_%s.raw", filemax, SR[rec_SR].txt);
-        #ifdef DEBUGSERIAL
+        #ifdef DEBUG_SERIAL
         Serial.println('start recording');
         Serial.println(filename);
         #endif
       rc = f_stat( filename, 0);
-      #ifdef DEBUGSERIAL
+      #ifdef DEBUG_SERIAL
           //Serial.printf("stat %s\n",STAT_ERROR_STRING[rc]);
       #endif
       rc = f_open (&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
-      #ifdef DEBUGSERIAL
+      #ifdef DEBUG_SERIAL
          //Serial.printf(" opened %s\n\r",FR_ERROR_STRING[rc]);
       #endif
       // check if file has errors
@@ -1564,31 +1620,18 @@ void changeDetector_mode()
           rc = f_close(&fil);
           if(rc == FR_INVALID_OBJECT)
           {
-            #ifdef DEBUGSERIAL
+            #ifdef DEBUG_SERIAL
             Serial.println("unlinking file");
             #endif
             rc = f_unlink(filename);
-            #ifdef DEBUGSERIAL
-            if (rc) {
-              die("unlink", rc);
-            }
-            #endif
+            
           }
-          else
-          {
-            #ifdef DEBUGSERIAL
-            die("close", rc);
-            #endif
-          }
+          
       }
       // retry open file
       rc = f_open(&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
 
-      #ifdef DEBUGSERIAL
-      if(rc) {
-        die("open", rc);
-      }
-      #endif
+      
       isFileOpen=1;
     }
   }
@@ -1629,7 +1672,7 @@ void changeDetector_mode()
 // ************** //
   void stopREC(AudioRecordQueue *recorder)
   {
-    #ifdef DEBUGSERIAL
+    #ifdef DEBUG_SERIAL
       Serial.print("stopRecording");
     #endif
     recorder->end();
@@ -1642,9 +1685,7 @@ void changeDetector_mode()
     }
     //close file
     rc = f_close(&fil);
-    #ifdef DEBUGSERIAL
-    if (rc) die("close", rc);
-    #endif
+    
     //
     isFileOpen=0;
     //  frec.close();
@@ -1652,7 +1693,7 @@ void changeDetector_mode()
   
     //  LeftButton_Mode = MODE_DISPLAY; 
     //  clearname();
-    #ifdef DEBUGSERIAL
+    #ifdef DEBUG_SERIAL
       Serial.println (" Recording stopped!");
     #endif
 
@@ -1698,7 +1739,6 @@ void startRecording() {
   
   //switch off several circuits
   mixFFT.gain(0,0);
-
   
   last_detector_mode=detector_mode; // save last used detectormode
   detector_mode=detector_heterodyne; // can only listen to heterodyne when recording 
@@ -1706,6 +1746,7 @@ void startRecording() {
   outputMixer.gain(0,1);
 
   nj=0;
+  //tft.sleep(true);
   recorder.begin();
 
 }
@@ -1718,6 +1759,7 @@ void continueRecording() {
 // ******************************************************** STOP RECORDING
 void stopRecording() {
   stopREC(&recorder);
+  //tft.sleep(false);
   set_SR(oper_SR); //switch back to operational samplerate
   //switch on FFT
   tft.fillScreen(COLOR_BLACK);
@@ -1741,22 +1783,12 @@ void startPlaying(int SR) {
 //      char fi[15];
 //      NAME.toCharArray(fi, sizeof(NAME));
 playActive=true;
-#ifdef DEBUGSERIAL
+#ifdef DEBUG_SERIAL
       Serial.println (" Started playing");
 #endif
 
-// inputMixer.gain(0,0); //switch off the mic-line as input
-// inputMixer.gain(1,1); //switch on the playerline as input
 
-// if (EncLeft_menu_idx==MENU_PLY)
-//   {
-//       outputMixer.gain(2,1);  //player to output
-//       outputMixer.gain(1,0);  //shutdown granular output
-//       outputMixer.gain(0,0);  //shutdown heterodyne output
-//       freq_real_backup=freq_real; //keep track of heterodyne setting
-//   }
-
- #ifdef DEBUGSERIAL
+ #ifdef DEBUG_SERIAL
       Serial.println (" Set mixers done");
 #endif 
   //direct play is used to test functionalty based on previous recorded data
@@ -1777,7 +1809,7 @@ playActive=true;
   SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
   set_SR(SR);
 
-#ifdef DEBUGSERIAL
+#ifdef DEBUG_SERIAL
       Serial.println (" Set sample rate done");
 #endif 
 
@@ -1786,26 +1818,26 @@ playActive=true;
   fileselect=cyclic_constrain(fileselect,0,filecounter-1);
   strncpy(filename, filelist[fileselect],  13);
 
-  #ifdef DEBUGSERIAL
+  #ifdef DEBUG_SERIAL
       Serial.println (" fileselect finished");
 #endif 
   //default display is waterfall
   //display_mode=waterfallgraph;
   //update_display();
   //check if the file can be played
- #ifdef DEBUGSERIAL
+ #ifdef DEBUG_SERIAL
       Serial.println (" just before playing");
       #endif
  if (player.play(filename))
     { 
-      #ifdef DEBUGSERIAL
+      #ifdef DEBUG_SERIAL
       Serial.println (" playing OK");
       #endif
 
     }
     else
     {
-     #ifdef DEBUGSERIAL
+     #ifdef DEBUG_SERIAL
       Serial.println (" Playing error");
      #endif
     }
@@ -1822,12 +1854,12 @@ playActive=true;
 // ********************************************************** STOP PLAYING ***************************************
 void stopPlaying() {
 
-#ifdef DEBUGSERIAL
+#ifdef DEBUG_SERIAL
   Serial.print("stopPlaying");
 #endif
   player.stop();
   
-#ifdef DEBUGSERIAL
+#ifdef DEBUG_SERIAL
   Serial.println (" Playing stopped");
 #endif
   playActive=false;
@@ -1835,16 +1867,9 @@ void stopPlaying() {
   // //restore last SR setting
   set_SR(oper_SR);
   
-  // freq_real=freq_real_backup;
-  // //restore heterodyne frequency
-  // set_freq_Oscillator (freq_real);
-
-  // outputMixer.gain(2,0); //stop the direct line output
-  // outputMixer.gain(1,1); // open granular output
-  // outputMixer.gain(0,1); // open heterodyne output
-
-  // inputMixer.gain(0,1); //switch on the mic-line
-  // inputMixer.gain(1,0); //switch off the playerline
+  osc_frequency=last_osc_frequency;
+  //restore heterodyne frequency
+  set_freq_Oscillator (osc_frequency);
  
 }
 
@@ -1885,7 +1910,7 @@ struct config_t {
   int oper_SR;
   int8_t mic_gain;
   int8_t volume;
-  int freq_real;
+  int osc_frequency;
   int8_t TE_speed;
   int8_t TE_low; 
   int preset_idx; //0= default values; 1=user values;
@@ -1912,7 +1937,7 @@ boolean loadFromEEPROM(struct config_t *ls) {  //mdrhere
   }
   if (thecrc == 0) { // have valid data
     //printConfig_t(ts_ptr);
-    #ifdef DEBUGSERIAL
+    #ifdef DEBUG_SERIAL
       Serial.printf("Found EEPROM version %s", ts_ptr->version_of_settings);  //line continued after version
     #endif
     if (ts.version_of_settings[3] == this_version[3] &&    // If the latest version
@@ -1922,19 +1947,19 @@ boolean loadFromEEPROM(struct config_t *ls) {  //mdrhere
       for (int i = 0; i < (int)sizeof(config_t); i++) { //copy data to location passed in
         *((unsigned char*)ls + i) = *((unsigned char*)ts_ptr + i);
       }
-      #ifdef DEBUGSERIAL
+      #ifdef DEBUG_SERIAL
       Serial.println(", loaded");
       #endif
 
       return true;
     } else { // settings are old version
-      #ifdef DEBUGSERIAL
+      #ifdef DEBUG_SERIAL
       Serial.printf(", not loaded, current version is %s\n", this_version);
       #endif
       return false;
     }
   } else {
-    #ifdef DEBUGSERIAL
+    #ifdef DEBUG_SERIAL
     Serial.println("Bad CRC, settings not loaded");
     #endif
     return false;
@@ -1969,11 +1994,11 @@ boolean saveInEEPROM(struct config_t *pd) {
   if (EEPROM.read(EE_CONFIG_START + t) != thecrc)  //and check it
     errors = true;
   if (errors == true) {
-    #ifdef DEBUGSERIAL
+    #ifdef DEBUG_SERIAL
     Serial.println(" error writing to EEPROM");
     #endif
   } else {
-    #ifdef DEBUGSERIAL
+    #ifdef DEBUG_SERIAL
     Serial.printf("%d bytes saved to EEPROM version %s \n", byteswritten, EE_CONFIG_VERSION);  //note: only changed written
     #endif
   }
@@ -1987,7 +2012,7 @@ boolean EEPROM_LOAD() {
   config_t E;
   if (loadFromEEPROM(&E) == true) {
     
-    #ifdef DEBUGSERIAL
+    #ifdef DEBUG_SERIAL
       Serial.print("BatV ");
       Serial.println(E.BatVersion);
       Serial.print("Preset ");
@@ -2042,7 +2067,7 @@ boolean EEPROM_LOAD() {
         tft.print(display_mode);    
         TE_speed=E.TE_speed; //replay speed for TE
         TE_low=E.TE_low; //low frequency for TE
-        freq_real=E.freq_real; // set centre frequency
+        osc_frequency=E.osc_frequency; // set centre frequency
         volume=E.volume;
         set_volume(volume);
         mic_gain=E.mic_gain;
@@ -2074,7 +2099,7 @@ void EEPROM_SAVE() {
   E.display_mode=startup_display;
   E.TE_low=TE_low;
   E.TE_speed=TE_speed;
-  E.freq_real=freq_real;
+  E.osc_frequency=osc_frequency;
   E.volume=volume;
   E.mic_gain=mic_gain;
   E.Encoder_direction=ENCODER_TURN;
@@ -2162,25 +2187,12 @@ void updateEncoder(uint8_t Encoderside )
       /******************************MAIN SR   ***************/
       if ((menu_idx==MENU_SR) and (LeftButton_Mode!=MODE_PLAY))  //selects a possible SR but only if we are not in the playing mode
         { oper_SR+=change;
-          oper_SR=cyclic_constrain(oper_SR,SR_MIN,SR_MAX);
+          oper_SR=constrain(oper_SR,SR_MIN,SR_MAX); //not cyclic
           set_SR(oper_SR);
           
         }
 
-     /******************************AUTO TE SPEED  ***************/
-    //     if (menu_idx==MENU_TES)
-    //     { TE_speed+=change;
-    //       TE_speed=cyclic_constrain(TE_speed,5,30);
-          
-    //     }
-    //  /******************************AUTO TE LOWDETECT  ***************/
-    //     if (menu_idx==MENU_TEL)
-    //     { TE_low+=change;
-    //       TE_low=cyclic_constrain(TE_low,15,35);
-        
-    //     }
-     
-      /******************************MIC_GAIN  ***************/
+     /******************************MIC_GAIN  ***************/
       if (menu_idx==MENU_MIC)
         {
          mic_gain+=change;
@@ -2204,10 +2216,11 @@ void updateEncoder(uint8_t Encoderside )
            if ((currentmillis-lastmillis)<100)
               { delta=5000;}
 
-          freq_real=freq_real+delta*change;
+          osc_frequency=osc_frequency+delta*change;
           // limit the frequency to 500hz steps
-          freq_real=cyclic_constrain(freq_real,7000,int(SR_real/2000)*1000-1000);
-          set_freq_Oscillator (freq_real);
+          osc_frequency=constrain(osc_frequency,7000,int(SR_real/2000)*1000-1000);
+          last_osc_frequency=osc_frequency; //always backup the F setting
+          set_freq_Oscillator (osc_frequency);
           lastmillis=millis();
          }
       
@@ -2241,7 +2254,7 @@ void updateEncoder(uint8_t Encoderside )
           //operational sample rate   
           if (setmenu_pos==SETMENU_SR)
             { oper_SR+=change;
-              oper_SR=cyclic_constrain(oper_SR,SR_MIN,SR_MAX);
+              oper_SR=constrain(oper_SR,SR_MIN,SR_MAX);
               set_SR(oper_SR);
               
              }   
@@ -2313,7 +2326,15 @@ void updateEncoder(uint8_t Encoderside )
 
               lastmillis=currentmillis; //record last time a setting was changed
             }
-                  
+            if (setmenu_pos==SETMENU_PARAM)
+              {  param+=change;
+                 param=constrain(param,0,25);
+                #ifdef USE_PWMTFT
+                 analogWriteResolution(8);
+                 analogWrite(3,param*10);
+                #endif
+              }
+           
         }  
   
 
@@ -2329,13 +2350,14 @@ void updateEncoder(uint8_t Encoderside )
 
       /******************************CHANGE PLAY SR   ***************/
       if ((EncLeft_menu_idx==MENU_PLY) and (EncRight_menu_idx==MENU_SR) and (EncRight_function==enc_value))//menu play selected on the left and right
-          {if (LeftButton_Mode==MODE_PLAY)
-              {  ply_SR+=change;
+          {if ((LeftButton_Mode==MODE_PLAY))
+              {  ply_SR+=EncRightchange;
                  ply_SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
-                 #ifdef DEBUGSERIAL
+                 #ifdef DEBUG_SERIAL
                   Serial.println("REnc SR change");
                  #endif
                  set_SR(ply_SR);
+                 
                 
               }
         }
@@ -2392,7 +2414,7 @@ void update_Buttons()
    {  micropushButton_L.update(); //ONLYU check the left encoderbutton
       if ((micropushButton_L.risingEdge())  )
        { 
-          #ifdef DEBUGSERIAL
+          #ifdef DEBUG_SERIAL
               Serial.println("micropushL 1");
           #endif
          #ifdef USERECORD 
@@ -2414,11 +2436,17 @@ void update_Buttons()
 
   //rightbutton is completely dedicated to detectormode
    if (micropushButton_R.risingEdge() ) {
-         #ifdef DEBUGSERIAL
+         #ifdef DEBUG_SERIAL
               Serial.println("micropushR ");
           #endif
           // micropush generates a risingEdge direct after startup !!
-         {detector_mode++;
+         {
+           if (detector_mode==detector_heterodyne)
+             {
+               last_osc_frequency=osc_frequency; //store osc_frequency when leaving HT mode
+             }
+           
+           detector_mode++;
           if (detector_mode>detector_passive)
             {detector_mode=0;}
 
@@ -2429,7 +2457,7 @@ void update_Buttons()
     }
    //leftbutton function is based on leftbutton_mode)
     if (micropushButton_L.risingEdge()) {
-          #ifdef DEBUGSERIAL
+          #ifdef DEBUG_SERIAL
               Serial.println("micropushL ");
           #endif
 
@@ -2473,7 +2501,7 @@ void update_Buttons()
 
         if (LeftButton_Mode==MODE_REC) 
         { 
-          #ifdef DEBUGSERIAL
+          #ifdef DEBUG_SERIAL
               Serial.println("micropushL 2");
           #endif
         
@@ -2499,7 +2527,7 @@ void update_Buttons()
           { 
             if (display_mode==settings_page) //leaving settings mode
               {
-               #ifdef DEBUGSERIAL
+               #ifdef DEBUG_SERIAL
                 Serial.println("Leave settings menu");
                #endif
                display_mode=last_display_mode; //restore previous display_mode
@@ -2510,7 +2538,7 @@ void update_Buttons()
                }
               else
               {
-                #ifdef DEBUGSERIAL
+                #ifdef DEBUG_SERIAL
                 Serial.println("Enter settings menu");
                #endif
 
@@ -2546,7 +2574,9 @@ void update_Buttons()
            //SR=ply_SR;
            
            LeftButton_Mode=MODE_PLAY; // directly set LEFTBUTTON to play/stop mode
+           last_osc_frequency=osc_frequency; //keep track of heterodyne setting
            initPlay(); //switch SD to playing
+           set_SR(ply_SR); //switch to the play SR
            //shut down input
            inputMixer.gain(0,0); //switch off the mic-line as input
            inputMixer.gain(1,1); //switch on the playerline as input
@@ -2554,28 +2584,28 @@ void update_Buttons()
            outputMixer.gain(2,1);  //player to output
            outputMixer.gain(1,0);  //shutdown granular output
            outputMixer.gain(0,0);  //shutdown heterodyne output
-           freq_real_backup=freq_real; //keep track of heterodyne setting           
            
            countRAWfiles(); // update the filelist
            //set the right encoder to samplerate
            EncRight_menu_idx=MENU_SR;
            EncRight_function=enc_value; 
-           #ifdef DEBUGSERIAL
+
+           #ifdef DEBUG_SERIAL
               Serial.println("direct set MODEPLAY");
            #endif   
+           
+
          }
          
          if (EncLeft_function==enc_menu) //user has pressed to go back to the menu, restart the detector
          {
-           #ifdef DEBUGSERIAL
+           #ifdef DEBUG_SERIAL
               Serial.println("SD ACTIVE switch back to menu");
            #endif  
-            //restore operational SR setting
+            //restore operational SR setting and last_osc for HT
+            osc_frequency=last_osc_frequency;
             set_SR(oper_SR);
-            freq_real=freq_real_backup;
-            //restore heterodyne frequency
-            set_freq_Oscillator (freq_real);
-            
+                                 
             outputMixer.gain(2,0); //stop the direct line output
             outputMixer.gain(1,1); // open granular output
             outputMixer.gain(0,1); // open heterodyne output
@@ -2630,13 +2660,18 @@ void update_Buttons()
 //###########################################################################
 
 void setup() {
- #ifdef DEBUGSERIAL
+ #ifdef DEBUG_SERIAL
   Serial.begin(9800);
-  delay(5000); //wait 10 seconds 
+  delay(5000); //wait 5 seconds 
  #endif
-  
+
+ #if USE_PWMTFT
+    analogWrite(3,200); //put screen always at low power
+ #endif
+
   #ifdef USETFT
   tft.begin();
+  
   tft.setRotation( 0 );
   tft.setScroll(0);
   tft.setTextColor(COLOR_WHITE);
@@ -2671,6 +2706,7 @@ void setup() {
   sgtl5000.micGain (mic_gain);
   //sgtl5000.adcHighPassFilterDisable(); // does not help too much!
   sgtl5000.lineInLevel(0);
+  sgtl5000.audioProcessorDisable();
   
 /* Valid values for dap_avc parameters
 // **BUG** with a max gain of 0 turning the AVC off leaves a hung AVC problem where the attack seems to hang in a loop. with it set 1 or 2, this does not occur.
@@ -2696,18 +2732,22 @@ void setup() {
    }
  #endif   
 
-
   analogReference(DEFAULT);
-  analogReadResolution(12);
+  analogReadResolution(10);
   analogReadAveraging(32);
- //read voltage on 3v3 bus
-  int mv1;
-  mv1 = 1195 * 4096 /analogRead(71);
-  int mv2;
-  pinMode(A3, INPUT);
-  //mv2 =  (analogRead(A17)*2);
-  mv2 = analogRead(A3)*0.86*2; //rough estimate of battery on VIN
-  
+
+  int mv1 = 1195*1024/analogRead(71); //3v3 in at Teensy
+
+ #ifdef USE_VIN_ADC
+    adc->setAveraging(32, ADC_0); // set number of averages
+    adc->setResolution(12,ADC_0); // set bits of resolution
+    adc->setReference(ADC_REFERENCE::REF_1V2, ADC_0);
+    adc->setConversionSpeed(ADC_CONVERSION_SPEED::LOW_SPEED,ADC_0); // change the conversion speed
+    adc->setSamplingSpeed(ADC_SAMPLING_SPEED::LOW_SPEED,ADC_0); // change the sampling speed
+    //R1=17.33K R2=2.161 RT=19.49  2.161/19.49=0.111
+    VIN= (adc->analogRead(A3))*2.702;///1024; //rough estimate of battery on VIN based on measurements
+#endif
+
 // Init TFT display
 #ifdef USETFT
   // tft.begin();
@@ -2745,17 +2785,19 @@ void setup() {
   else
   {tft.println("Settings:DEFAULT");
     }
-  
-  
+    
     
   #endif
   
   tft.print("V:");
   tft.print(mv1);
-  tft.print(" VCC ");
-  tft.println(mv2);
-  
-  delay(3000); //wait 3 seconds to clearly show the time
+  #ifdef USE_VIN_ADC
+   
+    tft.print(" VCC ");
+    tft.println(VIN);
+   
+  #endif 
+  delay(3000); //wait 3 seconds to clearly show the data
   tft.fillScreen(COLOR_BLACK);
   tft.setCursor(0, 0);
   tft.setScrollarea(TOP_OFFSET,BOTTOM_OFFSET);
@@ -2774,7 +2816,7 @@ void setup() {
 
   if(!initSD())
   {
-      #ifdef DEBUGSERIAL
+      #ifdef DEBUG_SERIAL
           Serial.println("Unable to access the SD card");
           delay(500);
       #endif
@@ -2791,7 +2833,7 @@ void setup() {
 
 // ***************** SETUP AUDIO *******************************
 set_SR (oper_SR); //set operational sample rate
-set_freq_Oscillator (freq_real);
+set_freq_Oscillator (osc_frequency);
 inputMixer.gain(0,1); //microphone active
 inputMixer.gain(1,0); //player off
 
@@ -2852,6 +2894,7 @@ void loop()
 
   //update the time regularly 
   struct tm tx = seconds2time(RTC_TSR);
+   
   if (tx.tm_min!=old_time_min)
   { tft.setFont(Arial_16);
     tft.setCursor(180,20);
@@ -2860,19 +2903,11 @@ void loop()
     char tstr[9];
     snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
     tft.print(tstr);
-
-    int mv2=analogRead(A3)*0.86*2; //rough estimate on VIN
-    if (mv2>4500)
-     { tft.setCursor(180,0);
-       tft.print("USB");
-     }
-     else if (mv2>3000)
-     { tft.setCursor(180,0);
-       tft.print(mv2);
-     }
-     
-    
     old_time_min=tx.tm_min;
+    #ifdef USE_VIN_ADC
+     VIN= (adc->analogRead(A3))*2.702; //empirical !!
+    #endif  
+
    }
 
   }
