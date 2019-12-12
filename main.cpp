@@ -8,6 +8,9 @@
 // ...change the source ... and recompile
 //CALL TEENSY_REBOOT ... this will directly upload the changed HEX
 
+
+//https://forum.pjrc.com/threads/42336-Reset-audio-board-codec-SGTL5000-in-realtime-processing/page3
+
 /* CORBEE */
 /* TEENSY 3.6 PINSETUP (20180901)
                  GND *                * Vin  - PREAMP V+  ----------------------R
@@ -25,8 +28,8 @@
        AUDIO MCLK 11 *                *  14 AUDIO -SCLK                     
        AUDIO MISO 12 *                *  13 AUDIO -RX                       
                 3.3V *                *  GND                 
-                  24 .                .  A22
-                  25 .                .  A21
+                  24 .                .  A22 DAC1
+                  25 .                .  A21 DAC0 
                   26 .                *  39  TFT MISO
         TFT SCLK  27 *                *  38  MICROPUSH_L
         TFT MOSI  28 *                *  37  MICROPUSH_R
@@ -37,16 +40,28 @@
 
 */
 
-#define batversion "v0.98 20190901"
-#define versionno 97 // used in EEProm storage
+/* SGTL5000 references */
+/* VDDD pin 30 1.8V (via AP7313)
+ VDDA pin 5 3.3V (via ferrite 600)
+ VDDI pin 30 3.3V (before ferrite 600) */
+
+#define batversion "v0.100 20191112"
+#define versionno 100 // used in EEProm storage
 //PIO (platformio) or ARDUINO environment 
 #define COMPILER PIO
 
 #define USE_VIN_ADC
 //#define USE_PWMTFT
 //#define DEBUG_SERIAL
+/* 0.100 tester with automatic recording */
 
-/* changes 
+/* 0.99 tested new settings for REG 0x0028 (REF_CTRL) and 0x002a(MIC_CTRL).
+        re-building PLAYD 
+        changed setup of Auto_TE detection (peaks and )
+        ADDED addition routines for register ANA_ADC_CTRL ()
+        REF_CTRL becomes default 0002 instead of 01F2 (analog ground voltage control lowered from 1.575 to 0.8V) added to settings
+        MIC_CTRL becomes default 010x instead of 017x (mic bias voltage adjustment lowered from 3 to 1.25V) added to settings
+
 * v0.97/0.98 fixed bug in the replay mode: when choosing a file the replay-sample_rate changed also
         added routines to monitor VIN (A3 ADC on pin17 using a voltage divider and capacitor) see #define USE_VIN_ADC
         added routine to control TFT PWM from pin3, see #define USE_PWMTFT
@@ -193,7 +208,7 @@
 
 
 //USE a TFT (this code will not function properly without !!! Currently only setup for ILI9341 )
-#define USETFT
+#define USE_TFT
 
 #define USESD
 #define USESD1
@@ -262,18 +277,20 @@ uint32_t lastmillis;
 elapsedMillis started_detection; //start timing directly after FFT detects an ultrasound
 elapsedMillis end_detection; //start timing directly after FFT detects the end of the ultrasound
 elapsedMillis since_heterodyne=1000; //timing interval for auto_heterodyne frequency adjustments
+elapsedMillis recording_running;
+elapsedMillis recording_stopped=60000; // set at a high value so the detector is armed when auto_rec is started
 uint16_t callLength=0;
 //uint16_t clicker=0;
 
 // ************************************  TFT *****************************
 // TFT definitions currently only setup for ILI9341
 
-#ifdef USETFT
+#ifdef USE_TFT
  #define ILI9341
  #ifdef ILI9341
   #include "ILI9341_t3.h"
   #include "font_Arial.h"
-  
+  #define TFT_FONT Arial_16 
   
  //see https://www.pjrc.com/store/display_ili9341_touch.html 
 
@@ -332,12 +349,13 @@ uint16_t callLength=0;
 
 // ******** LEFT AND RIGHT ENCODER CONNECTIONS/BUTTONS
 
+boolean AUTO_REC=false;
+
 /************** LButton Mode SETTINGS *****************/
 const int8_t    MODE_DISPLAY =0;  //default left
 const int8_t    MODE_REC = 1; //
 const int8_t    MODE_PLAY = 2; //
-const int8_t    MODE_MAX=3; // limiter for leftbutton
-
+const int8_t    MODE_AUTOREC=3; //
 const int8_t    MODE_DETECT = 5; // default right
 
 #include <Encoder.h>
@@ -393,10 +411,10 @@ AudioRecordQueue                 recorder;
 AudioSynthWaveformSineHires      sine1; // local oscillator
 //AudioFilterBiquad                BiQuad1;
 AudioEffectMultiply              heterodyne_multiplier; // multiply = mix
+byte FFT_N = 2; //averages per FFT sample  2*4
 AudioAnalyzeFFT256               myFFT; // for spectrum display
 AudioPlaySdRaw                   player;
 AudioEffectGranular              granular1;
-//mAudioEffectGranular             granular1; change by WMXZ
 AudioMixer4                      mixFFT;
 AudioMixer4                      outputMixer; //selective output
 AudioMixer4                      inputMixer; //selective input
@@ -413,16 +431,16 @@ AudioConnection input_todelay       (inputMixer,0, granular1, 0);
 AudioConnection switch_toFFT        (mixFFT,0, myFFT,0 ); //raw recording channel
 AudioConnection input_toheterodyne1 (inputMixer, 0, heterodyne_multiplier, 0); //heterodyne 1 signal
 AudioConnection sineheterodyne1     (sine1, 0, heterodyne_multiplier, 1);//heterodyne 1 mixerfreq
-AudioConnection granular_toout      (granular1,0, outputMixer,1);
-AudioConnection heterodyne1_toout   (heterodyne_multiplier, 0, outputMixer, 0);  //heterodyne 1 output to outputmixer
-AudioConnection player_toout        (inputMixer,0, outputMixer, 2);    //direct signal (use with player) to outputmixer
-AudioConnection output_toheadphoneleft      (outputMixer, 0, i2s_out, 0); // output to headphone
+AudioConnection granular_toout      (granular1,0, outputMixer,1); //granular to outputmixer 1
+AudioConnection heterodyne1_toout   (heterodyne_multiplier, 0, outputMixer, 0);  //heterodyne 1 output to outputmixer 0
+AudioConnection player_toout        (inputMixer,0, outputMixer, 2);    //direct signal (use with player) to outputmixer 2
+AudioConnection output_toheadphoneleft      (outputMixer, 0, i2s_out, 0); // output to headphone 
 AudioConnection output_toheadphoneright     (outputMixer, 0, i2s_out, 1);
 
 AudioControlSGTL5000        sgtl5000;
 
 //const int myInput = AUDIO_INPUT_LINEIN;
-const int myInput = AUDIO_INPUT_MIC;
+int myInput = AUDIO_INPUT_MIC;
 
 // ****************** TEENSY MODEL BASED BUFFERS ***********************************
 // WARNING: this setup uses a lot of memory in buffers (2x 96K !!)
@@ -447,7 +465,7 @@ int16_t granularMemory[GRANULAR_MEMORY_SIZE];
 
 // ******************** DISPLAY MODES ********************
 
-#define debug_page 4 //debug page (TODO) will show active debug messages 
+#define settings1_page 4 //recording settings 
 #define settings_page 3 //special settings page
 #define waterfallgraph 2
 #define spectrumgraph 1
@@ -459,7 +477,7 @@ const char* DP [5] =
     "spectrum",
     "waterfall",
     "settings",
-    "debug"
+    "AutoRec settings"
   };
 
 
@@ -480,7 +498,8 @@ const char* DP [5] =
 #define SR_234K              11
 #define SR_281K              12
 #define SR_352K              13
-#define SR_MAX               13
+#define SR_384K              13
+#define SR_MAX               14
 
 // ***************** SAMPLE RATE DESCRIPTION
 typedef struct SR_Descriptor
@@ -505,7 +524,8 @@ const SR_Descriptor SR [SR_MAX + 1] =
     {  SR_192K,  "192", 192000},
     {  SR_234K,  "234", 234000},
     {  SR_281K,  "281", 281000},
-    {  SR_352K,  "352", 352800}
+    {  SR_352K,  "352", 352800},
+    {  SR_384K,  "384", 383500}
 };
 
 // default samplerates 
@@ -521,10 +541,14 @@ int SR_real = SR[oper_SR].osc_frequency;
 const char * SRtext=SR[oper_SR].txt;
 
 // ****************************** defaults SETTINGS at startup 
+
+int A_mem_max=0;
+int A_cpu_max=0;
+
 int startup_display=spectrumgraph;
 int display_mode=spectrumgraph; //default display
 int last_display_mode=spectrumgraph;
-int8_t mic_gain = 30; // start detecting with this MIC_GAIN in dB
+int8_t mic_gain = 30; // start detecting with this MIC_GAIN in mic_gain
 int8_t volume=50;
 //int8_t TE_speed=20; // moved to EEprom section
 //int8_t TE_low=15 ; //move to EEprom section
@@ -537,8 +561,21 @@ int16_t EEsaved_count=0;
 int8_t TE_speed=20;
 int8_t TE_low=15 ;
 int8_t param=10;
+int8_t AREC_D=20; //automated recording duration in seconds
+int8_t AREC_P=60; //automated recording minimal pauze between recordings in seconds
+int8_t AREC_F=25; //automated recording minimal frequency in kHz
+int8_t AREC_S=1; //automated recording minimal signalstrength
 
-int preset_idx=1; //0= default values; 1=user values;
+boolean ref_ctrl_default=false;
+unsigned int sgtl5000_ref_ctrl=0x01F2; //new startup value instead of 0x01F2
+unsigned int BIAS=0x0002;
+unsigned int VAG=0x1F;
+
+boolean mic_ctrl_default=false;
+unsigned int sgtl5000_mic_ctrl=0x170; //new startup value instead of 0x0170
+
+int use_presets=1; //0= default values; 1=user values stored on EEprom;
+
 #ifdef USE_VIN_ADC
   int VIN=0; //VIN from ADC
   #include <ADC.h>
@@ -556,7 +593,7 @@ int preset_idx=1; //0= default values; 1=user values;
 
 /******************* MAIN MENU ********************************/
 /*********************************************************/
-
+#define MENU_FONT Arial_14
 //TODO constants should be part of the menuentry, a single structure to hold the info#
 #define  MENU_VOL   0 //volume
 #define  MENU_MIC   1 //mic_gain
@@ -564,30 +601,35 @@ int preset_idx=1; //0= default values; 1=user values;
 #define  MENU_SR    3 //sample rate
 #define  MENU_REC   4 //record
 #define  MENU_PLAY  5 //play
-#define  MENU_PLD   6 //play at original rate
-#define  MENU_SETTINGS 7 // SETTINGS menu
+#define  MENU_PLAYD   6 //play at original rate
+#define  MENU_AUTOREC  7 //automated recording
+#define  MENU_SETTINGS 8 // SETTINGS menu
+#define  MENU_SETTINGS1 9 // SETTINGS menu
 
-#define  MENU_MAX MENU_SETTINGS
+#define  MENU_MAX MENU_SETTINGS1
 
-const int Leftchoices=MENU_MAX+1; //can have any value
-const int Rightchoices=MENU_SR+1; //allow up to SR
+const int Leftchoices=MENU_MAX+1; //will show all menu options
+const int Rightchoices=MENU_SR+1; //allow up to SRate
 const char* MenuEntry [Leftchoices] =
   {
-    "Vol.",  //L and R
+    "Vol.",  //L and R encoder
     "Gain",
     "Freq.",
     "SRate", 
-    "Record", //only L
+    "Record", //only L encoder
     "Play",
     "PlayD",
-    "Settings"
+    "AutoRecord",
+    "Settings",
+    "AutoRec Settings"
   };
 
 // ************************************************    settings menu
-// THIS MENU STARTS at TOP_OFFSET-45 (currently at 45) and uses 20 pixels/line. The bottom should be above BOTTOM_OFFSET (320-40=280) so
-// there is space for 280-45=245/20=12 lines with Arial_16
-// goto a menuline on screen and clear it if its selected
+// THIS MENU STARTS at TOP_OFFSET-45 (currently at 45) and uses X pixels/line (depending on the SETMENU_FONT). 
+// The bottom should be above BOTTOM_OFFSET (320-40=280)
 int setmenu_pos=0;
+#define SETMENU_FONT Arial_13
+
 #define SETMENU_DISPLAY 0
 #define SETMENU_DETECTOR 1
 #define SETMENU_STARTUPMODE 2
@@ -599,10 +641,12 @@ int setmenu_pos=0;
 #define SETMENU_SR_PLY 8 //Sample Rate
 #define SETMENU_TIME  9
 #define SETMENU_DATE 10
-#define SETMENU_PARAM 11
+#define SETMENU_VAG 11
+#define SETMENU_INPUT 12
+#define SETMENU_FFT_N 13
 
 #define SETMENU_MIN 0
-#define SETMENU_MAX 11 // MAXIMIZE AT 10 !!!! with ARIAL 16
+#define SETMENU_MAX 13 // maximum depending on the menu_fontsize
 
 const char* SetMenuEntry [SETMENU_MAX+1] =
   {
@@ -617,10 +661,31 @@ const char* SetMenuEntry [SETMENU_MAX+1] =
     "SampleRate play ",
     "Time ",
     "yyyyymmdd ",
-    "param"
-
+    "VAG",
+    "input",
+    "FFT_N",
+    
   };
 
+int setmenu1_pos=0;
+#define SETMENU1_FONT Arial_13
+#define SETMENU1_SR_REC 0 //Sample Rate
+#define SETMENU1_AREC_DURATION 1 //duration in seconds
+#define SETMENU1_AREC_PAUSE 2 //pauze in seconds
+#define SETMENU1_AREC_F 3 //lowest frequency
+#define SETMENU1_AREC_S 4 //lowest signalstrength
+
+#define SETMENU1_MIN 0
+#define SETMENU1_MAX 4 // maximum depending on the menu_fontsize
+
+const char* SetMenuEntry1 [SETMENU1_MAX+1]=
+{
+ "Recorder SampleRate",
+ "AREC Duration",
+ "AREC Pause",
+ "AREC Lo_Freq",
+ "AREC Lo_signal"
+};
 
 //***************************************** available DETECTOR modes
 #define detector_heterodyne 0
@@ -684,7 +749,7 @@ float powerspectrum_Max=0;
 // ************** FUNCTIONS  //
 int calc_menu_dxoffset(const char* str)  // to position the menu on the right screenedge
 {
-#ifdef USETFT
+#ifdef USE_TFT
   String s=String(str); 
   char charBuf[50];
   s.toCharArray(charBuf, 50) ;
@@ -701,7 +766,7 @@ int calc_menu_dxoffset(const char* str)  // to position the menu on the right sc
 void SETMenu_line(int line) // position the cursor, clear the line if this is an active menuline or otherwise just display the text
                             // TODO: optimize to only update the necessary lines instead of rewriting all
         { 
-          int h = Arial_14.cap_height+3;
+          int h = SETMENU_FONT.cap_height+3;
           tft.setCursor(0,TOP_OFFSET-45+line*h);
           if (line==setmenu_pos)
             {tft.setTextColor(COLOR_WHITE);
@@ -713,6 +778,22 @@ void SETMenu_line(int line) // position the cursor, clear the line if this is an
           tft.print(SetMenuEntry[line]);
          
         }
+void SETMenu1_line(int line) // position the cursor, clear the line if this is an active menuline or otherwise just display the text
+                            // TODO: optimize to only update the necessary lines instead of rewriting all
+        { 
+          int h = SETMENU1_FONT.cap_height+3;
+          tft.setCursor(0,TOP_OFFSET-45+line*h);
+          if (line==setmenu1_pos)
+            {tft.setTextColor(COLOR_WHITE);
+             tft.fillRect(0,TOP_OFFSET-45+line*h,240,h,COLOR_BLACK);
+            }
+          else
+          { tft.setTextColor(COLOR_YELLOW);
+          }
+          tft.print(SetMenuEntry1[line]);
+         
+        }
+
 
 void showMenu_value(const char *str)
         {
@@ -723,18 +804,22 @@ void showMenu_value(const char *str)
         }
 //**************************************  MAIN DISPLAY UPDATE 
 void update_display() {
-  #ifdef USETFT
+  #ifdef USE_TFT
   //default updates
+  char tstr[9];
+  float SR_FFTratio=1/(SR_real/FFT_points);
 
+  if (AUTO_REC==false)
+    {
     tft.setTextColor(ENC_MENU_COLOR);
-    tft.setFont(Arial_16);
+    tft.setFont(TFT_FONT);
     //clear the top
     tft.fillRect(0,0,240,TOP_OFFSET-50,MENU_BCK_COLOR);
     tft.drawLine(0,TOP_OFFSET-50, 240, TOP_OFFSET-50, COLOR_WHITE);
 
     //clear the grapharea above the live graphs
     if (display_mode==spectrumgraph)
-      { tft.fillRect(0,TOP_OFFSET-30,240,30,COLOR_BLACK);
+      { tft.fillRect(0,TOP_OFFSET-50,240,50,COLOR_BLACK);
       }
     if (display_mode==waterfallgraph)  
     { tft.fillRect(0,TOP_OFFSET-6,240,6,COLOR_BLACK);
@@ -775,7 +860,7 @@ void update_display() {
         tft.print("error");
      }
       
-      char tstr[9];
+      
       
       
       #ifdef USE_VIN_ADC
@@ -788,17 +873,17 @@ void update_display() {
       {
          tft.print("USB");
       }
-      
       #endif
 
       tft.setCursor(180,20);
       struct tm tx = seconds2time(RTC_TSR);
       
       tft.setTextColor(ENC_MENU_COLOR);
-      //if the user is editing the time show seconds also
       snprintf(tstr,9, "%02d:%02d", tx.tm_hour, tx.tm_min);
       tft.print(tstr);
 
+    } //if AUTOREC 
+    
     
 
     // *********************** SETTINGS PAGE ****************************
@@ -806,13 +891,16 @@ void update_display() {
       { 
         //position just below the top  
 
-        tft.setCursor(0,TOP_OFFSET-45);
+        // tft.setCursor(0,20);
+        // char tstr[9];
+        // tft.fillRect(0,20,240,20,COLOR_BLACK);`
+        // snprintf(tstr,9, "M%04d C%04d", A_mem_max,A_cpu_max);
+        // tft.print(tstr); 
         tft.setTextColor(COLOR_YELLOW); //default color
-        tft.setFont(Arial_14); //default font allows 12 lines of settings
+        tft.setFont(SETMENU_FONT); //default font allows 12 lines of settings
         
         setmenu_pos=cyclic_constrain(setmenu_pos,SETMENU_MIN,SETMENU_MAX);
-        char tstr[9];
-
+        
         SETMenu_line(SETMENU_ENC);
         if (ENCODER_TURN==1)
           { snprintf(tstr,9, "Clockw");
@@ -821,8 +909,7 @@ void update_display() {
            {snprintf(tstr,9, "C-Clockw");
            }
         showMenu_value(tstr);
-         
-
+        
 
         SETMenu_line(SETMENU_TE_LOW);
         snprintf(tstr,9, "%02d", TE_low);
@@ -862,7 +949,7 @@ void update_display() {
         //tft.print(tstr);
         
         SETMenu_line(SETMENU_STARTUPMODE);
-        if (preset_idx==0)
+        if (use_presets==0)
              {snprintf(tstr,9, "Default");
               }
              else
@@ -870,13 +957,61 @@ void update_display() {
                 };
         showMenu_value(tstr);
 
-        SETMenu_line(SETMENU_PARAM);
-        snprintf(tstr,9, "%04d", param);
+      
+        SETMenu_line(SETMENU_INPUT);
+        if (myInput==AUDIO_INPUT_LINEIN)
+             {snprintf(tstr,9, "LINE_IN");
+              }
+             else
+             {snprintf(tstr,9, "MIC_IN");
+                };
+        showMenu_value(tstr);
+        
+        SETMenu_line(SETMENU_VAG);
+        snprintf(tstr,9, "%04X", VAG);
         showMenu_value(tstr);
 
-        
+        SETMenu_line(SETMENU_FFT_N);
+        snprintf(tstr,9, "%04d", FFT_N);
+        showMenu_value(tstr);
+
+        // SETMenu_line(SETMENU_AREC_DURATION);
+        // snprintf(tstr,9, "%04d", AREC_D);
+        // showMenu_value(tstr);
+
+        // SETMenu_line(SETMENU_AREC_PAUSE);
+        // snprintf(tstr,9, "%04d", AREC_P);
+        // showMenu_value(tstr);
       }  
-    
+      //#end settings page
+
+    if (display_mode==settings1_page) // display user settings
+      { 
+        tft.setTextColor(COLOR_YELLOW); //default color
+        tft.setFont(SETMENU1_FONT); //default font allows 12 lines of settings
+        
+        setmenu1_pos=cyclic_constrain(setmenu1_pos,SETMENU1_MIN,SETMENU1_MAX);
+
+        SETMenu1_line(SETMENU1_AREC_DURATION);
+        snprintf(tstr,9, "%04d", AREC_D);
+        showMenu_value(tstr);
+
+        SETMenu1_line(SETMENU1_AREC_PAUSE);
+        snprintf(tstr,9, "%04d", AREC_P);
+        showMenu_value(tstr);
+
+        SETMenu1_line(SETMENU1_AREC_F);
+        snprintf(tstr,9, "%04dkHz", AREC_F);
+        showMenu_value(tstr);
+
+        SETMenu1_line(SETMENU1_AREC_S);
+        snprintf(tstr,9, "%04d", AREC_S);
+        showMenu_value(tstr);
+
+        SETMenu1_line(SETMENU1_SR_REC);
+        showMenu_value(SR[rec_SR].txt);
+
+      }
      //BOTTOM PART OF SCREEN      
      
      /****************** SHOW ENCODER/BUTTON SETTING ***********************/
@@ -889,7 +1024,8 @@ void update_display() {
      // set the colors according to the function of the encoders
      //if (RightButton_Mode==MODE_DETECT )
      // show menu selection as menu-active of value-active
-     if (display_mode!=settings_page)
+     tft.setFont(MENU_FONT);
+     if ((display_mode!=settings_page) and (display_mode!=settings1_page) and (AUTO_REC==false))
       {
        if (EncLeft_function==enc_value)
         { tft.setTextColor(ENC_VALUE_COLOR);
@@ -898,7 +1034,7 @@ void update_display() {
         { tft.setTextColor(ENC_MENU_COLOR);
          }
       
-       if ((EncLeft_menu_idx==MENU_PLAY) and (EncLeft_function==enc_value)) // when play selected only show filename
+       if (((EncLeft_menu_idx==MENU_PLAY) or (EncLeft_menu_idx==MENU_PLAYD)) and (EncLeft_function==enc_value)) // when play selected only show filename
            { 
              #ifdef USESD
              char* ch = strchr(filelist[fileselect], '.');
@@ -909,10 +1045,10 @@ void update_display() {
              
              #endif
            }
-       else 
-       {  tft.print(MenuEntry[EncLeft_menu_idx]);
-          tft.print(" ");
-       }
+          else 
+          {  tft.print(MenuEntry[EncLeft_menu_idx]);
+              tft.print(" ");
+          }
        
        tft.setTextColor(COLOR_WHITE);
 
@@ -926,14 +1062,6 @@ void update_display() {
        if (EncLeft_menu_idx==MENU_VOL)
           { tft.print(volume);
           }
-
-      //  if (EncLeft_menu_idx==MENU_TEL)
-      //     { tft.print(TE_low);
-      //     } 
-
-      //  if (EncLeft_menu_idx==MENU_TES)
-      //     { tft.print(TE_speed);
-      //     } 
 
        if (EncLeft_menu_idx==MENU_SR)
           { tft.print(SR[oper_SR].txt);
@@ -950,13 +1078,14 @@ void update_display() {
        
     } // END of regular SETTINGS
 
-    if (display_mode==settings_page) // special setup for settings
+    if ((display_mode==settings_page) or (display_mode==settings1_page))// special setup for settings
     { tft.setTextColor(ENC_VALUE_COLOR);
       tft.print("Select");
       uint16_t dx=calc_menu_dxoffset("Change/Save"); 
       tft.setCursor(ILI9341_TFTWIDTH-dx,ILI9341_TFTHEIGHT-LINE1);
       tft.print("Change/Save");
     }
+    
     
     // ****************************** DISPLAY PUSHBUTTON FUNCTIONS 
     tft.setCursor(0,ILI9341_TFTHEIGHT-LINE2); //position of button functions
@@ -966,16 +1095,19 @@ void update_display() {
         tft.print("DISPLAY");
 
     if (LeftButton_Mode==MODE_REC)
-        { if (recorderActive)  
+        { if (AUTO_REC==true)
+              {tft.print("AUTO RECORD ACTIVE");}
+          else    
+           {if (recorderActive)  
             {   tft.print("REC ON");
                 }
             else
             {   tft.print("REC OFF");
             }
-                
-        }
+           }
+       }
     if (LeftButton_Mode==MODE_PLAY)
-        { if (playActive==false)
+        { if (playActive==false) 
             { tft.print("PLAY");
             }
             else
@@ -991,25 +1123,27 @@ void update_display() {
     if (RightButton_Mode==MODE_DETECT) 
        s=(char*)"DETECT";
 
-    if (playActive==false) //dont show rightside menu choice when playing a file to allow the display of a filename
+    if ((playActive==false) and (AUTO_REC==false))//dont show rightside menu choice when playing a file to allow the display of a filename
      {uint16_t sx=tft.strPixelLen(s);
       tft.setCursor(ILI9341_TFTWIDTH-sx-5,ILI9341_TFTHEIGHT-LINE2);
       tft.print(s);
      }  
 
     // show a scale with ticks for every 10kHz except for no_graph or settings_page
-    if (display_mode!=settings_page)
+    if ((display_mode!=settings_page) and (display_mode!=settings_page) and (AUTO_REC==false))
      {if (display_mode>0)
-      { float x_factor=10000/(0.5*(SR_real / FFT_points));
-        int curF=2*int(osc_frequency/(SR_real / FFT_points));
+      { 
+        float x_factor=10000/(0.5*(SR_real/FFT_points));
+        float f=SR_real/FFT_points; 
+        int curF=2*int(osc_frequency/f);
         
         int maxScale=int(SR_real/20000);
         for (int i=1; i<maxScale; i++)
         { tft.drawFastVLine(i*x_factor, TOP_OFFSET-SPECTRUMSCALE, SPECTRUMSCALE, ENC_MENU_COLOR);
         }
         // detection range
-        int curLo=int(TE_low*1000/(SR_real / FFT_points));
-        int curHi=int(80000/(SR_real / FFT_points));
+        int curLo=int(TE_low*1000*(SR_FFTratio));
+        int curHi=int(80000*(SR_FFTratio));
         if (detector_mode==detector_Auto_TE) //show detection band
           { tft.drawFastHLine(2*curLo,TOP_OFFSET-SPECTRUMSCALE,2*(curHi-curLo),COLOR_WHITE);
             tft.drawFastHLine(2*curLo,TOP_OFFSET-1,2*(curHi-curLo),COLOR_WHITE);
@@ -1017,22 +1151,20 @@ void update_display() {
 
         if (curF<ILI9341_TFTWIDTH-40)
           {
-          
-        tft.fillCircle(curF,TOP_OFFSET-3,3,ENC_MENU_COLOR);
-                
-        if (display_mode==spectrumgraph)
-          { //tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
-            char tstr[9];
-            snprintf(tstr,9, "%02d", int(osc_frequency/1000));
-            tft.setCursor(curF-10,TOP_OFFSET-30);  
-            tft.print(tstr);
-          }
+           tft.fillCircle(curF,TOP_OFFSET-3,3,ENC_MENU_COLOR);
+           if (display_mode==spectrumgraph)
+            { //tft.drawFastVLine(curF,TOP_OFFSET-20,20,ENC_MENU_COLOR);
+              char tstr[9];
+              snprintf(tstr,9, "%02d", int(osc_frequency/1000));
+              tft.setCursor(curF-10,TOP_OFFSET-30);  
+              tft.print(tstr);
+            }
           }
       }
-      else 
-        { tft.setCursor(0,TOP_OFFSET-SPECTRUMSCALE);
-          tft.print("NO GRAPHS");
-        }
+       else 
+         { tft.setCursor(0,TOP_OFFSET-SPECTRUMSCALE);
+           tft.print("NO GRAPHS");
+         }
      }
 
    #endif
@@ -1040,16 +1172,52 @@ void update_display() {
 
 
 // *************************************************** FUNCTIONS **************************************
-void       set_mic_gain(int8_t gain) {
-
-    AudioNoInterrupts();
-    sgtl5000.micGain (gain);
+void  set_mic_gain(int8_t gain) {
+   
+   if (myInput==AUDIO_INPUT_MIC)
+     {AudioNoInterrupts();
+    //sgtl5000.micGain (gain);
+    //shutdown linein
+    sgtl5000.lineInLevel(0);
+    // routine adapted to allow different mic_ctrl settings
+    byte preamp_gain=0;
+      if (gain >= 40) {
+          preamp_gain = 3;
+          gain -= 40;
+        } else if (gain >= 30) {
+          preamp_gain = 2;
+          gain -= 30;
+        } else if (gain >= 20) {
+          preamp_gain = 1;
+          gain -= 20;
+        } else {
+          preamp_gain = 0;
+        }
+       sgtl5000.SET_CHIP_MIC_CTRL(sgtl5000_mic_ctrl | preamp_gain );
+       unsigned int input_gain = (gain * 2) / 3; 
+      if (input_gain > 15) input_gain = 15;
+          sgtl5000.SET_CHIP_ANA_ADC_CTRL(input_gain << 4 | input_gain);
+      
+      
     AudioInterrupts();
+     }
+     else
+     {
+       AudioNoInterrupts();
+       //shutdown microphone
+       sgtl5000.SET_CHIP_MIC_CTRL(sgtl5000_mic_ctrl | 0 );
+       sgtl5000.SET_CHIP_ANA_ADC_CTRL(0 << 4 | 0);
+       //open linein
+       sgtl5000.lineInLevel(gain/4);
+       AudioInterrupts();
+     }
+     
+
     update_display();
     powerspectrum_Max=0; // change the powerspectrum_Max for the FFTpowerspectrum
 } // end function set_mic_gain
 
-void       set_volume(int8_t vol) {
+void  set_volume(int8_t vol) {
     AudioNoInterrupts();
     sgtl5000.volume (vol*0.01);
     AudioInterrupts();
@@ -1058,7 +1226,7 @@ void       set_volume(int8_t vol) {
 
 
 // ***************************************************** OSCILLATOR
-void       set_freq_Oscillator(int freq) {
+void  set_freq_Oscillator(int freq) {
     // audio lib thinks we are still in 44118sps sample rate
     // therefore we have to scale the frequency of the local oscillator
     // in accordance with the REAL sample rate
@@ -1078,6 +1246,7 @@ void       set_freq_Oscillator(int freq) {
     update_display();
 } // END of function set_freq_Oscillator
 // ***************************************************** I2S
+
 // set samplerate code by Frank Boesing
 void setI2SFreq(int freq) {
   typedef struct {
@@ -1089,8 +1258,10 @@ void setI2SFreq(int freq) {
 //(double)F_PLL * (double)clkArr[iFreq].mult / (256.0 * (double)clkArr[iFreq].div);
 //ex 180000000* 1 /(256* 3 )=234375Hz  setting   {1,3} at 180Mhz
 
-  const int numfreqs = 17;
-  const int samplefreqs[numfreqs] = {  8000,      11025,      16000,      22050,       32000,       44100, (int)44117.64706 , 48000,      88200, (int)44117.64706 * 2,   96000, 176400, (int)44117.64706 * 4, 192000,  234000, 281000, 352800};
+//
+// *******************************  ONLY FUNCTIONAL FOR 180MHZ !!!!!! **************************
+  const int numfreqs = 18;
+  const int samplefreqs[numfreqs] = {  8000,      11025,      16000,      22050,       32000,       44100, (int)44117.64706 , 48000,      88200, (int)44117.64706 * 2,   96000, 176400, (int)44117.64706 * 4, 192000,  234000, 281000, 352800, 383500};
 
 #if (F_PLL==16000000)
   const tmclk clkArr[numfreqs] = {{16, 125}, {148, 839}, {32, 125}, {145, 411}, {64, 125}, {151, 214}, {12, 17}, {96, 125}, {151, 107}, {24, 17}, {192, 125}, {127, 45}, {48, 17}, {255, 83} };
@@ -1105,7 +1276,7 @@ void setI2SFreq(int freq) {
 #elif (F_PLL==168000000)
   const tmclk clkArr[numfreqs] = {{32, 2625}, {21, 1250}, {64, 2625}, {21, 625}, {128, 2625}, {42, 625}, {8, 119}, {64, 875}, {84, 625}, {16, 119}, {128, 875}, {168, 625}, {32, 119}, {189, 646} };
 #elif (F_PLL==180000000)
-  const tmclk clkArr[numfreqs] = {{46, 4043}, {49, 3125}, {73, 3208}, {98, 3125}, {183, 4021}, {196, 3125}, {16, 255},   {128, 1875}, {107, 853},     {32, 255},   {219, 1604}, {1, 4},      {64, 255},     {219,802}, { 1,3 },  {2,5} , {1,2} };  //last value 219 802
+  const tmclk clkArr[numfreqs] = {{46, 4043}, {49, 3125}, {73, 3208}, {98, 3125}, {183, 4021}, {196, 3125}, {16, 255},   {128, 1875}, {107, 853},     {32, 255},   {219, 1604}, {1, 4},      {64, 255},     {219,802}, { 1,3 },  {2,5} , {1,2}, {6,11} };  //last value 219 802
 #elif (F_PLL==192000000)
   const tmclk clkArr[numfreqs] = {{4, 375}, {37, 2517}, {8, 375}, {73, 2483}, {16, 375}, {147, 2500}, {1, 17}, {8, 125}, {147, 1250}, {2, 17}, {16, 125}, {147, 625}, {4, 17}, {32, 125} };
 #elif (F_PLL==216000000)
@@ -1113,7 +1284,7 @@ void setI2SFreq(int freq) {
 #elif (F_PLL==240000000)
   const tmclk clkArr[numfreqs] = {{16, 1875}, {29, 2466}, {32, 1875}, {89, 3784}, {64, 1875}, {147, 3125}, {4, 85}, {32, 625}, {205, 2179}, {8, 85}, {64, 625}, {89, 473}, {16, 85}, {128, 625} };
 #endif
-
+  //TODO: use a direct index instead of a lookup !!
   for (int f = 0; f < numfreqs; f++) {
     if ( freq == samplefreqs[f] ) {
       while (I2S0_MCR & I2S_MCR_DUF) ;
@@ -1141,7 +1312,7 @@ void  set_SR (int sr) {
 // ***************************************************** SPECTRUM GRAPH
 
 void spectrum() { // spectrum analyser code by rheslip - modified
-#ifdef USETFT
+#ifdef USE_TFT
   uint16_t OFFSET =ILI9341_TFTHEIGHT-BOTTOM_OFFSET-TOP_OFFSET;  //default 320 - 40 - 90 = 190
   int16_t FFT_sbin [128];
   // limit until bin 119 to prevent overflow
@@ -1178,235 +1349,6 @@ void spectrum() { // spectrum analyser code by rheslip - modified
 }
 
 
-// **************** General graph and detector selective functions *******************************************************
-void update_Display(void) 
-{
-#ifdef USETFT 
-
-// code for 256 point FFT
- if (myFFT.available()) {
-  const uint16_t Y_OFFSET = TOP_OFFSET;
-  static int count = TOP_OFFSET;
-  
-  // lowest frequencybin to detect as a batcall
-  int batCall_LoF_bin= int((TE_low*1000.0)/(SR_real / FFT_points));
-  // highest frequencybin to detect as a batcall
-  int batCall_HiF_bin= int(80000.0/(SR_real / FFT_points));
-
-  uint8_t spec_hi=120; //default 120
-  uint8_t spec_lo=2; //default 2
-  uint8_t spec_width=2;
-
-  uint16_t FFT_pixels[240]; // maximum of 240 pixels, each one is the result of one FFT
-  memset(FFT_pixels,0,sizeof(FFT_pixels)); //blank the pixels
- 
-    int FFT_peakF_bin=0;
-    int peak=256;
-    int avgFFTbin=0;
-    // there are 128 FFT different bins only 120 are shown on the graphs
-    FFT_count++;
-    for (int i = spec_lo; i < spec_hi; i++) {
-      int val = myFFT.output[i]*10 + 10; //v1
-      avgFFTbin+=val;
-      //detect the peakfrequency
-      if (val>peak)
-       { peak=val;
-         FFT_peakF_bin=i;
-        }
-      if (val<5)
-           {val=5;}
-      
-      uint8_t pixpos=(i-spec_lo)*spec_width;
-      FFT_pixels[pixpos] = tft.color565(
-               min(255, val*2), //very low values will show as red
-              (val/3>255)? 255 : val/3, // up to 3*255 will be coloured a mix of red/green (yellow) 
-               val/9>255 ?255: val/9 ); // uo to 9*255 will be coloured a mix of red/green/blue (white)
-
-      for (int j=1; j<spec_width; j++)
-         { FFT_pixels[pixpos+j]=FFT_pixels[pixpos];
-         }
-    }
-
-   
-    avgFFTbin=avgFFTbin/(spec_hi-spec_lo);
-
-    if ((peak/avgFFTbin)<1.05) //very low peakvalue so probably a lot of noise, dont detect this as a peak
-     { FFT_peakF_bin=0;
-     }
-
-  int powerSpectrum_Maxbin=0;
-  // detected a peak in the bat frequencies
-    if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin))
-    { //collect data for the powerspectrum
-      for (int i = spec_lo; i < spec_hi; i++)
-      {    //add new samples
-          FFTpowerspectrum[i]+=myFFT.output[i];
-          //keep track of the maximum
-          if (FFTpowerspectrum[i]>powerspectrum_Max)
-            { powerspectrum_Max=FFTpowerspectrum[i];
-              powerSpectrum_Maxbin=i;
-            }
-      }
-      //keep track of the no of samples with bat-activity
-      powerspectrumCounter++;
-    }
- 
-    if (display_mode==spectrumgraph)
-         { 
-         if (detector_mode==detector_Auto_TE)
-            {  if(FFT_count%5==0) //update the spectrum every 5th sample
-                     { spectrum();
-                     }
-             }
-          else
-          { if(FFT_count%2==0) //update the spectrum every 2nd sample
-                spectrum();
-          }
-        }   
-
-    // update spectrumdisplay after every 50th FFT sample with bat-activity
-    if (display_mode==waterfallgraph)
-      if ((powerspectrumCounter>50)  )
-       { powerspectrumCounter=0;
-          int binLo=spec_lo; int binHi=0;
-          float bin2frequency=(SR_real / FFT_points)*0.001;
-         //clear powerspectrumbox
-         tft.fillRect(0,TOP_OFFSET-POWERGRAPH-SPECTRUMSCALE,ILI9341_TFTWIDTH,POWERGRAPH, COLOR_BLACK);
-         // keep a minimum maximumvalue to the powerspectrum
-         
-         //find the nearest frequencies below 10% of the maximum to show on screen as values
-         if (powerSpectrum_Maxbin!=0)
-           {
-              boolean searchedge=true;
-              //lowest value
-              int i=powerSpectrum_Maxbin;
-              while(searchedge) {
-                   if ((FFTpowerspectrum[i]/(powerspectrum_Max+1))>0.1)
-                     { i--;
-                       if (i==spec_lo)
-                        {searchedge=false;
-                         binLo=spec_lo; }
-                     }
-                    else
-                     { searchedge=false;
-                       binLo=i;
-                     }
-
-                  }
-              //highest value
-              searchedge=true;
-              i=powerSpectrum_Maxbin;
-              while(searchedge) {
-                   if ((FFTpowerspectrum[i]/(powerspectrum_Max+1))>0.1)
-                     { i++;
-                       if (i==spec_hi)
-                        {searchedge=false;
-                         binHi=0; }
-                     }
-                    else
-                     { searchedge=false;
-                       binHi=i;
-                     }
-                  }
-           }
-          //draw spectrumgraph
-          for (int i=spec_lo; i<spec_hi; i++)
-            { int ypos=FFTpowerspectrum[i]/powerspectrum_Max*POWERGRAPH;
-              tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_RED);
-              if (i==powerSpectrum_Maxbin)
-                { tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_YELLOW);
-                }
-              //reset powerspectrum for next samples
-              FFTpowerspectrum[i]=0;
-            }
-          
-          if (powerSpectrum_Maxbin!=0)
-          {
-          tft.setCursor(150,TOP_OFFSET-POWERGRAPH);
-          tft.setTextColor(ENC_VALUE_COLOR);
-          tft.print(int(binLo*bin2frequency) );
-          tft.print(" ");
-         
-          tft.setTextColor(ENC_MENU_COLOR);
-          tft.print(int(powerSpectrum_Maxbin*bin2frequency) );
-           tft.print(" ");
-          tft.setTextColor(ENC_VALUE_COLOR);
-          tft.print(int(binHi* bin2frequency) );
-          }
-          powerspectrum_Max=powerspectrum_Max*0.5; //lower the max after a graphupdate
-       }
-
-       
-
-    uint16_t milliGap=50; //param*10;
-    
-    /*************************  SIGNAL DETECTION ***********************/
-    //signal detected in the detection range
-    if ((FFT_peakF_bin>batCall_LoF_bin) and (FFT_peakF_bin<batCall_HiF_bin)) 
-      {
-        // check if it is a new discovered signal in the detection range
-        if (not Ultrasound_detected)
-          { started_detection=0; //start timing of the call length
-            //clicker=0;
-           
-
-            if (detector_mode==detector_Auto_heterodyne)
-               if (since_heterodyne>1000) //update the most every second
-                {osc_frequency=int((FFT_peakF_bin*(SR_real / FFT_points)/500))*500; //round to nearest 500hz
-                 set_freq_Oscillator(osc_frequency);
-                 since_heterodyne=0;
-                 //granular1.stop();
-                }
-
-            //restart the TimeExpansion only if the previous call was completely played
-            if ((detector_mode==detector_Auto_TE) and (TE_ready) )
-             { granular1.stop();
-               granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
-               granular1.setSpeed(1.0/TE_speed);
-               TE_ready=false;
-             }
-          } /* end ultrasound detected */
-
-        // what if the ultrasound comes in nearly continously ...we than need to stop the play automatically !
-        // if after 80ms after detecting we still have ultrasound coming we need to trigger a new detection
-
-        //clicker++;
-        Ultrasound_detected=true; 
-        
-     }
-   else // in the last sample there is no peak in the detection range
-        {
-          if (Ultrasound_detected) //previous sample was still a call
-           { callLength=started_detection; // got a pause so store the time since the start of the call
-             end_detection=0; //start timing the length of the replay
-             }
-
-          Ultrasound_detected=false; // set the end of the call
-        }
-
-
-    // restart TimeExpansion recording a bit after the call has finished completely
-    if ((!TE_ready) and (started_detection>(milliGap)))
-      { //stop the time expansion
-        TE_ready=true;
-        Ultrasound_detected=false; // allow a new signal to be processed
-        granular1.stopTimeExpansion();
-      }
-
-   if (display_mode==waterfallgraph)
-   {
-     if (end_detection<50) //keep scrolling the screen until 50ms after the last bat-call
-      { //if (TE_ready) //not playing TE
-        { tft.writeRect( 0,count, ILI9341_TFTWIDTH,1, (uint16_t*) &FFT_pixels); //show a line with spectrumdata
-          tft.setScroll(count);
-         count++;
-        }
-      }
-     if (count >= ILI9341_TFTHEIGHT-BOTTOM_OFFSET) count = Y_OFFSET;
-   }
-  }
-#endif
-}
 
 // ******************************************************* MODES *****************************
 void defaultMenuPosition()
@@ -1682,6 +1624,18 @@ void changeDetector_mode()
     
     //
     isFileOpen=0;
+
+     sprintf(filename, "B%u_%s.log", filemax, SR[rec_SR].txt);
+     rc = f_stat( filename, 0);
+     rc = f_open (&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
+     unsigned int mic_ref=sgtl5000.read(0x0028); //MICREF
+     unsigned int mic_ctrl=sgtl5000.read(0x002a); //MICCTRL
+     unsigned int ana_adc_ctrl=sgtl5000.read(0x0020); //ANA_ADC_CTRL
+
+     sprintf(filename, "Gain %02d M_REF %04X M_CTRL %04X ANA_ADC %04X", mic_gain, mic_ref, mic_ctrl, ana_adc_ctrl);
+     f_write(&fil, filename,80,&wr);
+     rc = f_close(&fil);
+
     //  frec.close();
     //  playfile = recfile;
   
@@ -1720,18 +1674,23 @@ void startRecording() {
   tft.setScroll(0);
   tft.fillRect(0,0,ILI9341_TFTWIDTH,ILI9341_TFTHEIGHT,COLOR_BLACK);
   tft.setTextColor(ENC_VALUE_COLOR);
-  tft.setFont(Arial_28);
+  tft.setFont(Arial_24);
   tft.setCursor(0,100);
-  tft.print("RECORDING");
+  if (AUTO_REC)
+   {tft.println("AUTO REC");
+   }
+  else
+   {tft.println("RECORD");
+   }
   tft.print(filename);
-  tft.setFont(Arial_16);
+  tft.setFont(TFT_FONT);
   
   update_display();
 
   granular1.stop(); //stop granular
   outputMixer.gain(1,0);  //shutdown granular output
   
-  //switch off several circuits
+  //switch off FFT 
   mixFFT.gain(0,0);
   
   last_detector_mode=detector_mode; // save last used detectormode
@@ -1781,32 +1740,29 @@ playActive=true;
       Serial.println (" Started playing");
 #endif
 
-
- #ifdef DEBUG_SERIAL
-      Serial.println (" Set mixers done");
-#endif 
   //direct play is used to test functionalty based on previous recorded data
   //this will play a previous recorded raw file through the system as if it were live data coming from the microphone
-// if (EncLeft_menu_idx==MENU_PLD)
-//   {
-//       outputMixer.gain(2,0);  //shutdown direct audio from player to output
-//       outputMixer.gain(0,1);  //default mode will be heterodyne based output
-//       if (detector_mode==detector_Auto_TE)
-//          { outputMixer.gain(1,1);  //start granular output processing
-//            outputMixer.gain(0,0);
-//          }
-//   }
+  if (EncLeft_menu_idx==MENU_PLAYD)
+    {
+        outputMixer.gain(2,0);  //shutdown direct audio from player to output
+        outputMixer.gain(0,1);  //default mode will be heterodyne based output
+        if (detector_mode==detector_Auto_TE)
+          { outputMixer.gain(1,1);  //start granular output processing
+            outputMixer.gain(0,0);
+          }
+    }
 
 //allow settling
   delay(100);
   //last_SR=SR; //store current samplerate 
-  SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
-  set_SR(SR);
-
+  if (EncLeft_menu_idx==MENU_PLAY)
+   {
+    SR=cyclic_constrain(ply_SR,SR_8K,MAX_PLY_SR);
+    set_SR(SR);
+   }
 #ifdef DEBUG_SERIAL
       Serial.println (" Set sample rate done");
 #endif 
-
 
 #ifdef USESD
   fileselect=cyclic_constrain(fileselect,0,filecounter-1);
@@ -1859,12 +1815,13 @@ void stopPlaying() {
   playActive=false;
   
   // //restore last SR setting
+  if (EncLeft_menu_idx==MENU_PLAY)
+  {
   set_SR(oper_SR);
-  
   osc_frequency=last_osc_frequency;
   //restore heterodyne frequency
   set_freq_Oscillator (osc_frequency);
- 
+  }
 }
 
 // **************** CONTINUE PLAYING
@@ -1881,6 +1838,279 @@ void continuePlaying() {
 }
 
 
+// **************** General graph and detector selective functions *******************************************************
+void update_Display(void) 
+{
+#ifdef USE_TFT 
+
+// code for 256 point FFT
+ if (myFFT.available()) {
+  const uint16_t Y_OFFSET = TOP_OFFSET;
+  static int count = TOP_OFFSET;
+  
+  float SR_FFTratio=(SR_real/FFT_points);
+
+  // lowest frequencybin to detect as a batcall
+  int signal_LoF_bin= int((TE_low*1000.0)/(SR_FFTratio));
+  if (AUTO_REC) 
+      { signal_LoF_bin= int((AREC_F*1000.0)/(SR_FFTratio));
+       }
+
+  // highest frequencybin to detect as a batcall
+  int signal_HiF_bin= int(80000.0/SR_FFTratio);
+
+  uint8_t spec_hi=120; //default 120
+  uint8_t spec_lo=2; //default 2
+  uint8_t spec_width=2;
+
+  uint16_t FFT_pixels[240]; // maximum of 240 pixels, each one is the result of one FFT
+  memset(FFT_pixels,0,sizeof(FFT_pixels)); //blank the pixels
+ 
+    int FFT_peakF_bin=0;
+    int peak=512;
+    if (AUTO_REC)
+       {peak=512*AREC_S;
+        }
+    int avgFFTbin=0;
+    // there are 128 FFT different bins only 120 are shown on the graphs
+    FFT_count++;
+    for (int i = spec_lo; i < spec_hi; i++) {
+      int val = myFFT.output[i]*10 + 10; //v1
+      
+      //only check for peaks above the lo_bin
+      if (i>signal_LoF_bin)
+      {
+       avgFFTbin+=val;
+       //detect if the peakfrequency is above the threshold and above the lo_bin setting
+       if ((val>peak) )
+        { peak=val;
+          FFT_peakF_bin=i;
+         }
+       }
+      // if (val<5)
+      //      {val=5;}
+      
+      uint8_t pixpos=(i-spec_lo)*spec_width;
+      FFT_pixels[pixpos] = tft.color565(
+               min(255, val*2), //very low values will show as red
+              (val/3>255)? 255 : val/3, // up to 3*255 will be coloured a mix of red/green (yellow) 
+               val/9>255 ?255: val/9 ); // uo to 9*255 will be coloured a mix of red/green/blue (white)
+
+      for (int j=1; j<spec_width; j++)
+         { FFT_pixels[pixpos+j]=FFT_pixels[pixpos];
+         }
+    }
+   
+   avgFFTbin=avgFFTbin/(spec_hi-signal_LoF_bin);
+
+   if ((peak/avgFFTbin)<1.1) //very low peakvalue so probably a lot of noise, dont detect this as a peak
+      { FFT_peakF_bin=0;
+      }
+
+   
+  int powerSpectrum_Maxbin=0;
+  boolean signal_detected= false;  
+  // detected a peak in the selected frequencies
+    if ((FFT_peakF_bin>signal_LoF_bin) and (FFT_peakF_bin<signal_HiF_bin))
+    { //collect data for the powerspectrum
+      signal_detected=true;
+      for (int i = spec_lo; i < spec_hi; i++)
+      {    //add new samples
+          FFTpowerspectrum[i]+=myFFT.output[i];
+          //keep track of the maximum
+          if (FFTpowerspectrum[i]>powerspectrum_Max)
+            { powerspectrum_Max=FFTpowerspectrum[i];
+              powerSpectrum_Maxbin=i;
+            }
+      }
+      //keep track of the no of samples with bat-activity
+      powerspectrumCounter++;
+    }
+    //use auto_rec settings for frequency abd signalstrength
+    
+    if (display_mode==spectrumgraph)
+         { 
+         if (detector_mode==detector_Auto_TE)
+            {  if(FFT_count%5==0) //update the spectrum every 5th sample
+                     { spectrum();
+                     }
+             }
+          else
+          { if(FFT_count%2==0) //update the spectrum every 2nd sample
+                spectrum();
+          }
+        }   
+
+    // update spectrumdisplay after every 50th FFT sample with bat-activity
+    if (display_mode==waterfallgraph)
+      if ((powerspectrumCounter>50)  )
+       { powerspectrumCounter=0;
+          int binLo=spec_lo; int binHi=0;
+          float bin2frequency=SR_FFTratio*0.001;
+         //clear powerspectrumbox
+         tft.fillRect(0,TOP_OFFSET-POWERGRAPH-SPECTRUMSCALE,ILI9341_TFTWIDTH,POWERGRAPH, COLOR_BLACK);
+         // keep a minimum maximumvalue to the powerspectrum
+         
+         //find the nearest frequencies below 10% of the maximum to show on screen as values
+         if (powerSpectrum_Maxbin!=0)
+           {
+              boolean searchedge=true;
+              //lowest value
+              int i=powerSpectrum_Maxbin;
+              while(searchedge) {
+                   if ((FFTpowerspectrum[i]/(powerspectrum_Max+1))>0.1)
+                     { i--;
+                       if (i==spec_lo)
+                        {searchedge=false;
+                         binLo=spec_lo; }
+                     }
+                    else
+                     { searchedge=false;
+                       binLo=i;
+                     }
+
+                  }
+              //highest value
+              searchedge=true;
+              i=powerSpectrum_Maxbin;
+              while(searchedge) {
+                   if ((FFTpowerspectrum[i]/(powerspectrum_Max+1))>0.1)
+                     { i++;
+                       if (i==spec_hi)
+                        {searchedge=false;
+                         binHi=0; }
+                     }
+                    else
+                     { searchedge=false;
+                       binHi=i;
+                     }
+                  }
+           }
+          //draw spectrumgraph
+          for (int i=spec_lo; i<spec_hi; i++)
+            { int ypos=FFTpowerspectrum[i]/powerspectrum_Max*POWERGRAPH;
+              tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_RED);
+              if (i==powerSpectrum_Maxbin)
+                { tft.drawFastVLine((i-spec_lo)*spec_width,TOP_OFFSET-ypos-SPECTRUMSCALE,ypos,COLOR_YELLOW);
+                }
+              //reset powerspectrum for next samples
+              FFTpowerspectrum[i]=0;
+            }
+          
+          if (powerSpectrum_Maxbin!=0)
+          {
+          tft.setCursor(120,TOP_OFFSET-POWERGRAPH);
+          tft.setTextColor(ENC_VALUE_COLOR);
+          tft.print(int(binLo*bin2frequency) );
+          tft.print(" ");
+         
+          tft.setTextColor(ENC_MENU_COLOR);
+          tft.print(int(powerSpectrum_Maxbin*bin2frequency) );
+          tft.print(" ");
+          tft.setTextColor(ENC_VALUE_COLOR);
+          tft.print(int(binHi* bin2frequency) );
+          // tft.print(" ");
+          // tft.setTextColor(ENC_VALUE_COLOR);
+          // tft.print(int(peak/512) );
+
+
+          }
+          powerspectrum_Max=powerspectrum_Max*0.5; //lower the max after a graphupdate
+       }
+
+   
+    uint16_t milliGap=80; //param*10;
+    
+    /*************************  SIGNAL DETECTION ***********************/
+    //signal detected in the detection range
+    if (signal_detected) 
+      {
+        if (detector_mode==detector_Auto_heterodyne)
+               if (since_heterodyne>1000) //update the most every second
+                {osc_frequency=int((FFT_peakF_bin*(SR_FFTratio)/500))*500+1000; //round to nearest 500hz and shift 1000hz up to make the signal audible
+                 set_freq_Oscillator(osc_frequency);
+                 since_heterodyne=0;
+                 //granular1.stop();
+                }
+
+        // check if it is a new discovered signal in the detection range
+        if (not Ultrasound_detected)
+          { started_detection=0; //start timing of the call length
+            //clicker=0;
+            // if (detector_mode==detector_Auto_heterodyne)
+            //    if (since_heterodyne>1000) //update the most every second
+            //     {osc_frequency=int((FFT_peakF_bin*(SR_real / FFT_points)/500))*500; //round to nearest 500hz
+            //      set_freq_Oscillator(osc_frequency);
+            //      since_heterodyne=0;
+            //      //granular1.stop();
+            //     }
+
+            //restart the TimeExpansion only if the previous call was completely played
+            if ((detector_mode==detector_Auto_TE) and (TE_ready) )
+             { granular1.stop();
+               granular1.beginTimeExpansion(GRANULAR_MEMORY_SIZE);
+               granular1.setSpeed(1.0/TE_speed);
+               TE_ready=false;
+             }
+          } /* end ultrasound detected */
+
+        // what if the ultrasound comes in nearly continously ...we than need to stop playing !
+        // if after 80ms after detecting we still have ultrasound coming we need to trigger a new detection
+
+        //clicker++;
+        Ultrasound_detected=true; 
+        
+     }
+   else // in the last sample there is no peak in the detection range
+        {
+          if (Ultrasound_detected) //previous sample was still a call
+           { callLength=started_detection; // got a pause so store the time since the start of the call
+             end_detection=0; //start timing the length of the replay
+             }
+
+          Ultrasound_detected=false; // set the end of the call
+        }
+
+
+    // restart TimeExpansion recording milliGap after the call has finished completely
+    if ((!TE_ready) and (started_detection>(milliGap)))
+      { //stop the time expansion
+        TE_ready=true;
+        Ultrasound_detected=false; // allow a new signal to be processed
+        granular1.stopTimeExpansion();
+      }
+
+   if (display_mode==waterfallgraph)
+   { //TODO: MAKE THIS MORE DEPENDENT. with higher FFTrate 50ms will flood the screen ! 
+     if (end_detection<50) //keep scrolling the screen until 50ms after the last bat-call
+      { //if (TE_ready) //not playing TE
+        { tft.writeRect( 0,count, ILI9341_TFTWIDTH,1, (uint16_t*) &FFT_pixels); //show a line with spectrumdata
+          tft.setScroll(count);
+         count++;
+        }
+      }
+     if (count >= ILI9341_TFTHEIGHT-BOTTOM_OFFSET) 
+       {count = Y_OFFSET;
+       }
+   }
+
+   //automatic recording of signals if we are NOT recording allready
+   if (recorderActive==false)
+   //if autorecording is on and a signal was found and the last recording ended more than AREC_P seconds ago
+    if ((AUTO_REC) and (signal_detected) and (recording_stopped>(AREC_P*1000)) )
+      {
+       recorderActive=true; 
+       startRecording();
+       recording_running=0; 
+       display_mode=no_graph;
+
+      }
+  }
+#endif
+}
+
+
+
 //*******************************EEPROM *********************************************************
 // original routines copied from https://github.com/DD4WH/Teensy-ConvolutionSDR/blob/master/Teensy_Convolution_SDR.ino
 #ifdef USEEEPROM
@@ -1888,7 +2118,7 @@ void continuePlaying() {
 #include <EEPROM.h>
 #include <util/crc16.h>
 
-#define EE_CONFIG_VERSION "0003"  //4 char ID of the EE structure, will change with each change in EEprom structure
+#define EE_CONFIG_VERSION "0004"  //4 char ID of the EE structure, will change with each change in EEprom structure
 #define EE_CONFIG_START 0    
 //general variables stored in EEprom
 
@@ -1907,7 +2137,12 @@ struct config_t {
   int osc_frequency;
   int8_t TE_speed;
   int8_t TE_low; 
-  int preset_idx; //0= default values; 1=user values;
+  int8_t AREC_D; //automated recording duration in seconds
+  int8_t AREC_P; //automated recording minimal pauze between recordings in seconds
+  int8_t AREC_F; //automated recording minimal frequency in kHz
+  int8_t AREC_S; //automated recording minimal signalstrength
+
+  int use_presets; //0= default values; 1=user values;
   int Encoder_direction; //1 or -1
 
   char version_of_settings[4]; //versionstring to track changes in the EEstructure
@@ -2010,7 +2245,7 @@ boolean EEPROM_LOAD() {
       Serial.print("BatV ");
       Serial.println(E.BatVersion);
       Serial.print("Preset ");
-      Serial.println(E.preset_idx);
+      Serial.println(E.use_presets);
       Serial.print("detector ");
       Serial.println(E.detector_mode);
       Serial.print("display ");
@@ -2032,14 +2267,14 @@ boolean EEPROM_LOAD() {
     for (int i = 0; i < 4; i++)
         versionEE[i]= E.version_of_settings[i];
     
-    if (E.preset_idx==1) //user has set preset_idx to default to usersettings
+    if (E.use_presets==1) //user has set use_presets to default to usersettings
       {
         ply_SR=E.ply_SR; //replay speed
         rec_SR=E.rec_SR;
         oper_SR=E.oper_SR; //sample rate 
-        preset_idx=E.preset_idx; // default or user settings at startup
-        if (preset_idx!=0) 
-          {preset_idx=1;} //enforce possible wrong saving
+        use_presets=E.use_presets; // default or user settings at startup
+        if (use_presets!=0) 
+          {use_presets=1;} //enforce possible wrong saving
         detector_mode=E.detector_mode; // detector mode
         startup_detector=detector_mode;
         display_mode=E.display_mode; //display mode
@@ -2069,6 +2304,11 @@ boolean EEPROM_LOAD() {
         ENCODER_TURN=E.Encoder_direction;
         enc_dn=ENCODER_TURN*-1;
         enc_up=ENCODER_TURN;
+        AREC_D=E.AREC_D; //automated recording duration in seconds
+        AREC_P=E.AREC_P; //automated recording minimal pauze between recordings in seconds
+        AREC_F=E.AREC_F; //automated recording minimal frequency in kHz
+        AREC_S=E.AREC_S; //automated recording minimal signalstrength
+
 
       }
 
@@ -2088,7 +2328,7 @@ void EEPROM_SAVE() {
   E.ply_SR=ply_SR;
   E.rec_SR=rec_SR;
   E.oper_SR=oper_SR;
-  E.preset_idx=preset_idx;
+  E.use_presets=use_presets;
   E.detector_mode=startup_detector;
   E.display_mode=startup_display;
   E.TE_low=TE_low;
@@ -2097,6 +2337,10 @@ void EEPROM_SAVE() {
   E.volume=volume;
   E.mic_gain=mic_gain;
   E.Encoder_direction=ENCODER_TURN;
+  E.AREC_D=AREC_D; //automated recording duration in seconds
+  E.AREC_P=AREC_P; //automated recording minimal pauze between recordings in seconds
+  E.AREC_F=AREC_F; //automated recording minimal frequency in kHz
+  E.AREC_S=AREC_S; //automated recording minimal signalstrength
 
   E.crc = 0; //will be overwritten
   //printConfig_t(&E);  //for debugging
@@ -2142,17 +2386,17 @@ void updateEncoder(uint8_t Encoderside )
 
        //remove functionality when SD is not active, so no SDCARD mounted or SDCARD is unreadable
       if (!SD_ACTIVE)
-        { if ((menu_idx==MENU_PLAY) or (menu_idx==MENU_REC) )
+        { if ((menu_idx==MENU_PLAY) or (menu_idx==MENU_REC) or (menu_idx==MENU_PLAYD) or (menu_idx==MENU_AUTOREC))
            { // move menu to next available option
            if (change==1) 
-             {menu_idx=MENU_PLAY+1; }
+             {menu_idx=MENU_AUTOREC+1; }
            if (change==-1)
              {menu_idx=MENU_REC-1;}
              
            }
         }
 
-      //allow revolving choices based on the encoder (left or right !!)
+      //allow revolving choices based on the encoder (left or rfight !!)
       menu_idx=cyclic_constrain(menu_idx,0,choices-1);
       
       if (Encoderside==enc_leftside)
@@ -2216,13 +2460,20 @@ void updateEncoder(uint8_t Encoderside )
       
       /******************************SETTINGS MENU  ***************/
     
-        // for the settings menu the left encoder selects the option and the right encoder changes the values
+        // for the settings menu the left encoder selects the option and the right encoder allows changes the values
         if ((menu_idx==MENU_SETTINGS) and (Encoderside==enc_leftside))
           {
             setmenu_pos+=change;
             setmenu_pos=cyclic_constrain(setmenu_pos,SETMENU_MIN,SETMENU_MAX);
           }
-        //the rightside encoder is used to change the current value of a given menu-entry
+
+        if ((menu_idx==MENU_SETTINGS1) and (Encoderside==enc_leftside))
+          {
+            setmenu1_pos+=change;
+            setmenu1_pos=cyclic_constrain(setmenu1_pos,SETMENU1_MIN,SETMENU1_MAX);
+          }
+
+        //the rightside encoder is used to change the current value of a given settings menu-entry
         if ((menu_idx==MENU_SETTINGS) and (Encoderside==enc_rightside))
         { 
           //encoder direction
@@ -2261,8 +2512,8 @@ void updateEncoder(uint8_t Encoderside )
           
           //startup settings 
           if (setmenu_pos==SETMENU_STARTUPMODE) //0= default, 1=user settings from EEprom
-            { preset_idx+=change;
-              preset_idx=cyclic_constrain(preset_idx,0,1); //allowed settings
+            { use_presets+=change;
+              use_presets=cyclic_constrain(use_presets,0,1); //allowed settings
              }      
           //default sampleRate for replay
           if (setmenu_pos==SETMENU_SR_PLY)
@@ -2272,7 +2523,7 @@ void updateEncoder(uint8_t Encoderside )
           //default sampleRate for recording  
           if (setmenu_pos==SETMENU_SR_REC)
             { rec_SR+=change;
-              rec_SR=cyclic_constrain(rec_SR,SR_44K,SR_352K);
+              rec_SR=cyclic_constrain(rec_SR,SR_44K,SR_MAX);
             }
           //set time
           if (setmenu_pos==SETMENU_TIME)
@@ -2316,20 +2567,80 @@ void updateEncoder(uint8_t Encoderside )
 
               lastmillis=currentmillis; //record last time a setting was changed
             }
-            if (setmenu_pos==SETMENU_PARAM)
-              {  param+=change;
-                 param=constrain(param,0,25);
-                #ifdef USE_PWMTFT
-                 analogWriteResolution(8);
-                 analogWrite(3,param*10);
-                #endif
+   
+            if (setmenu_pos==SETMENU_INPUT)
+              {    if (myInput==AUDIO_INPUT_LINEIN) 
+                     { myInput=AUDIO_INPUT_MIC;
+                       
+                      }
+                   else
+                   {
+                     myInput=AUDIO_INPUT_LINEIN;
+                     
+                     
+                   }
+                 AudioNoInterrupts();
+                   sgtl5000.inputSelect(myInput);
+                   sgtl5000.micGain(mic_gain);
+                 AudioInterrupts();
               }
+              
+            if (setmenu_pos==SETMENU_FFT_N)
+              {  FFT_N+=change;
+                 FFT_N=constrain(FFT_N,1,4);
+                 myFFT.averageTogether(FFT_N*4);
+              }
+
+            // if (setmenu_pos==SETMENU_AREC_DURATION)
+            //   {  AREC_D+=change;
+            //      AREC_D=constrain(AREC_D,5,60);
+            //   }
+            // if (setmenu_pos==SETMENU_AREC_PAUSE)
+            //   {  AREC_P+=change*5;
+            //      AREC_P=constrain(AREC_P,30,300);
+            //   }
+            
+           
+            if (setmenu_pos==SETMENU_VAG)
+               { VAG+=change;
+                 
+                 VAG=constrain(VAG,0,(0x1F));
+                 sgtl5000_ref_ctrl=VAG*0x10 | BIAS; 
+                 AudioNoInterrupts();
+                 sgtl5000.SET_CHIP_MIC_REF(sgtl5000_ref_ctrl);
+                 AudioInterrupts();
+
+                }
+          
            
         }  
-  
 
+       //the rightside encoder is used to change the current value of a given settings menu-entry
+        if ((menu_idx==MENU_SETTINGS1) and (Encoderside==enc_rightside))
+        { if (setmenu1_pos==SETMENU1_AREC_DURATION)
+              {  AREC_D+=change;
+                 AREC_D=cyclic_constrain(AREC_D,5,60);
+              }
+            if (setmenu1_pos==SETMENU1_AREC_PAUSE)
+              {  AREC_P+=change*5;
+                 AREC_P=cyclic_constrain(AREC_P,30,300);
+              }
+            //default sampleRate for recording  
+            if (setmenu1_pos==SETMENU1_SR_REC)
+            { rec_SR+=change;
+              rec_SR=cyclic_constrain(rec_SR,SR_44K,SR_MAX);
+            }
+            if (setmenu1_pos==SETMENU1_AREC_S)
+              {  AREC_S+=change;
+                 AREC_S=cyclic_constrain(AREC_S,1,20);
+              }
+            if (setmenu1_pos==SETMENU1_AREC_F)
+              {  AREC_F+=change*5;
+                 AREC_F=cyclic_constrain(AREC_F,10,80);
+              } 
+        }
       /******************************SELECT A FILE  ***************/
-      if ((EncLeft_menu_idx==MENU_PLAY) and (EncLeft_function==enc_value))//menu selected file to be played
+      if (((EncLeft_menu_idx==MENU_PLAY) or (EncLeft_menu_idx==MENU_PLAYD)) and (EncLeft_function==enc_value))//menu selected file to be played
          {  
            #ifdef USESD
            fileselect+=EncLeftchange;
@@ -2399,7 +2710,19 @@ void update_Encoders()
 void update_Buttons()
 {// Respond to button presses
  // try to make the interrupts as short as possible when recording
+ if (AUTO_REC)
+   {  micropushButton_L.update(); //ONLYU check the left encoderbutton
+      if (micropushButton_L.risingEdge())
+       { AUTO_REC=false;
+         stopRecording();
+         LeftButton_Mode == MODE_DISPLAY;
+         recorderActive=false;
+         display_mode=last_display_mode;
+         update_display();
+         
+       }
 
+   }
  if (recorderActive) // RECORDING MODE so do minimal checks !!
    {  micropushButton_L.update(); //ONLYU check the left encoderbutton
       if ((micropushButton_L.risingEdge())  )
@@ -2494,7 +2817,7 @@ void update_Buttons()
           #ifdef DEBUG_SERIAL
               Serial.println("micropushL 2");
           #endif
-        
+          
           if (recorderActive==false)  // when recorder is active interaction gets picked up earlier !!
             {   recorderActive=true;
                 update_display();
@@ -2535,7 +2858,7 @@ void update_Buttons()
               last_display_mode=display_mode;  
               last_detector_mode=detector_mode;
               display_mode=settings_page; //show the other user-defined settings
-              tft.fillScreen(COLOR_BLACK);
+              //tft.fillScreen(COLOR_BLACK);
               tft.setScroll(0);
               tft.fillRect(0,TOP_OFFSET-50,240,ILI9341_TFTHEIGHT-TOP_OFFSET+50-BOTTOM_OFFSET,COLOR_BLACK); 
               EncLeft_function=enc_value; // option selection
@@ -2547,13 +2870,55 @@ void update_Buttons()
             
          
          }
-      
+      if ((EncLeft_menu_idx==MENU_SETTINGS1)  )   //settings_page 
+          { 
+            if (display_mode==settings1_page) //leaving settings mode
+              {
+               #ifdef DEBUG_SERIAL
+                Serial.println("Leave settings menu");
+               #endif
+               display_mode=last_display_mode; //restore previous display_mode
+               detector_mode=last_detector_mode;
+               //tft.fillScreen(COLOR_BLACK); 
+               EncRight_function=enc_menu;
+               EncRight_menu_idx=MENU_MIC;
+               }
+              else
+              {
+                #ifdef DEBUG_SERIAL
+                Serial.println("Enter settings menu");
+               #endif
+
+              last_display_mode=display_mode;  
+              last_detector_mode=detector_mode;
+              display_mode=settings1_page; //show the other user-defined settings
+              tft.fillScreen(COLOR_BLACK);
+              tft.setScroll(0);
+              tft.fillRect(0,TOP_OFFSET-50,240,ILI9341_TFTHEIGHT-TOP_OFFSET+50-BOTTOM_OFFSET,COLOR_BLACK); 
+              EncLeft_function=enc_value; // option selection
+              setmenu1_pos=0;
+              EncRight_menu_idx=MENU_SETTINGS1;
+              EncRight_function=enc_value; //value selection
+              
+              }
+            
+         
+         }
      
      if (SD_ACTIVE)
      {
         //user has confirmed the choice for the leftbuttonmenu
+        
         if ((EncLeft_menu_idx==MENU_REC) and (EncLeft_function==enc_value) )  
           {LeftButton_Mode=MODE_REC; //select the choosen function for the leftbutton
+           initREC();
+           } 
+
+
+        if ((EncLeft_menu_idx==MENU_AUTOREC) and (EncLeft_function==enc_value) )  
+          {LeftButton_Mode=MODE_REC; //select the choosen function for the leftbutton
+           AUTO_REC=true;
+           tft.fillRect(0,0,240,320,COLOR_BLACK);
            initREC();
            } 
 
@@ -2586,9 +2951,39 @@ void update_Buttons()
            
 
          }
+         if ((EncLeft_menu_idx==MENU_PLAYD) and (EncLeft_function==enc_value)) //choose to select values
+         { //keep track of the SR
+           //last_SR=oper_SR; //store the last set SR
+           //SR=ply_SR;
+           
+           LeftButton_Mode=MODE_PLAY; // directly set LEFTBUTTON to play/stop mode
+           initPlay(); //switch SD to playing
+           //shut down input
+           inputMixer.gain(0,0); //switch off the mic-line as input
+           inputMixer.gain(1,1); //switch on the playerline as input
+                      
+           outputMixer.gain(2,0);  //player to output
+           outputMixer.gain(0,1);  //open heterodyne
+           if (detector_mode==detector_Auto_TE)
+            { outputMixer.gain(1,1);  //start granular output processing
+              outputMixer.gain(0,0); //shutdown heterodyne
+            }
+
+           countRAWfiles(); // update the filelist
+           //set the right encoder to samplerate
+           EncRight_menu_idx=MENU_SR;
+           EncRight_function=enc_value; 
+
+           #ifdef DEBUG_SERIAL
+              Serial.println("direct set MODEPLAYD");
+           #endif   
+           
+
+         }
          
          if (EncLeft_function==enc_menu) //user has pressed to go back to the menu, restart the detector
          {
+           
            #ifdef DEBUG_SERIAL
               Serial.println("SD ACTIVE switch back to menu");
            #endif  
@@ -2605,9 +3000,8 @@ void update_Buttons()
  
          }
 
-
-        //automatically change LEFTbutton back to displaymode if it was on play previously
-        if ((EncLeft_function==enc_menu) and (LeftButton_Mode==MODE_PLAY))
+        //automatically change LEFTbutton back to displaymode if it was on play or record previously
+        if ((EncLeft_function==enc_menu) and ((LeftButton_Mode==MODE_PLAY) or(LeftButton_Mode==MODE_REC)) )
           {LeftButton_Mode=MODE_DISPLAY;
            
            set_SR(oper_SR);
@@ -2621,7 +3015,7 @@ void update_Buttons()
 
     if (encoderButton_R.risingEdge())
     {
-      if (display_mode==settings_page)
+      if ((display_mode==settings_page) or (display_mode==settings1_page))
          {
            EEPROM_SAVE();
            tft.setTextColor(COLOR_WHITE);
@@ -2659,7 +3053,7 @@ void setup() {
     analogWrite(3,10); //put screen always at low power
  #endif
 
-  #ifdef USETFT
+  #ifdef USE_TFT
   tft.begin();
   
   tft.setRotation( 0 );
@@ -2695,24 +3089,38 @@ void setup() {
   sgtl5000.volume(V);
   sgtl5000.micGain (mic_gain);
   //sgtl5000.adcHighPassFilterDisable(); // does not help too much!
+
+  //sgtl5000.adcHighPassFilterFreeze();
   sgtl5000.lineInLevel(0);
-  sgtl5000.audioProcessorDisable();
-  
+  //sgtl5000.audioProcessorDisable();
+  sgtl5000.SET_CHIP_MIC_REF(sgtl5000_ref_ctrl); //write 0x0002 instead of the default 0x1F2 requires adapted control_sgtl5000.h 
+                                              // VAG = 0.8, normal ramp, +12.5% bias current
+  //sgtl5000.write(CHIP_REF_CTRL, 0x01F2); // VAG=1.575, normal ramp, +12.5% bias current default setting
+	//write(CHIP_REF_CTRL, 0x01F0); // VAG=1.575, normal ramp, nominal 0 bias current
+	//write(CHIP_REF_CTRL, 0x01F8); // VAG=1.575, normal ramp, -12.5% bias current
+	//write(CHIP_REF_CTRL, 0x01FA); // VAG=1.575, normal ramp, -25% bias current
+	//write(CHIP_REF_CTRL, 0x01FA); // VAG=1.575, normal ramp, -25% bias current
+	//write(CHIP_REF_CTRL, 0x01FC); // VAG=1.575, normal ramp, -37.5% bias current
+	//write(CHIP_REF_CTRL, 0x01FE); // VAG=1.575, normal ramp, -50.5% bias current
+
+
 /* Valid values for dap_avc parameters
 // **BUG** with a max gain of 0 turning the AVC off leaves a hung AVC problem where the attack seems to hang in a loop. with it set 1 or 2, this does not occur.
-	maxGain; Maximum gain that can be applied 	0 - 0 dB 	1 - 6.0 dB 	2 - 12 dB
+	maxGain; Maximum gain that can be applied 	0 - 0 mic_gain 	1 - 6.0 mic_gain 	2 - 12 mic_gain
 	lbiResponse; Integrator Response 	0 - 0 mS 	1 - 25 mS 	2 - 50 mS 	3 - 100 mS
 	hardLimit 	0 - Hard limit disabled. AVC Compressor/Expander enabled. 	1 - Hard limit enabled. The signal is limited to the programmed threshold (signal saturates at the threshold)
-	threshold : 	floating point in range 0 to -96 dB
-	attack :	floating point figure is dB/s rate at which gain is increased
-	decay :	floating point figure is dB/s rate at which gain is reduced
+	threshold : 	floating point in range 0 to -96 mic_gain
+	attack :	floating point figure is mic_gain/s rate at which gain is increased
+	decay :	floating point figure is mic_gain/s rate at which gain is reduced
 */
 // Initialise the AutoVolumeLeveller
   // sgtl5000.autoVolumeControl(1, 1, 0, -6, 40, 20); 
   // sgtl5000.autoVolumeEnable();
   // sgtl5000.audioPostProcessorEnable();
 
-  mixFFT.gain(0,1);
+  
+myFFT.averageTogether(FFT_N);
+mixFFT.gain(0,1);
  
 /* EEPROM CHECK  */
 #ifdef USEEEPROM
@@ -2722,24 +3130,11 @@ void setup() {
    }
  #endif   
 
-  analogReference(DEFAULT);
-  analogReadResolution(10);
-  analogReadAveraging(32);
+  
 
-  int mv1 = 1195*1024/analogRead(71); //3v3 in at Teensy
-
- #ifdef USE_VIN_ADC
-    adc->setAveraging(32, ADC_0); // set number of averages
-    adc->setResolution(12,ADC_0); // set bits of resolution
-    adc->setReference(ADC_REFERENCE::REF_1V2, ADC_0);
-    adc->setConversionSpeed(ADC_CONVERSION_SPEED::LOW_SPEED,ADC_0); // change the conversion speed
-    adc->setSamplingSpeed(ADC_SAMPLING_SPEED::LOW_SPEED,ADC_0); // change the sampling speed
-    //R1=17.33K R2=2.161 RT=19.49  2.161/19.49=0.111
-    VIN= (adc->analogRead(A3))*2.702;///1024; //rough estimate of battery on VIN based on measurements
-#endif
-
+ 
 // Init TFT display
-#ifdef USETFT
+#ifdef USE_TFT
   // tft.begin();
   tft.setRotation( 0 );
   tft.setTextColor(COLOR_WHITE);
@@ -2758,7 +3153,7 @@ void setup() {
   
   tft.println(versionStr);
   tft.println();
-  tft.setFont(Arial_16);
+  tft.setFont(TFT_FONT);
   snprintf(tstr,9, "%9lX",chipNum[2]);  
   tft.print("Teensy SN:");
   tft.println(tstr);
@@ -2769,7 +3164,7 @@ void setup() {
   tft.println(tstr);
   tft.print("  saved #:");
   tft.println(EEsaved_count);
-  if (preset_idx==1)
+  if (use_presets==1)
   {tft.println("Settings:USER");
   }
   else
@@ -2778,16 +3173,31 @@ void setup() {
     
     
   #endif
+
+  analogReference(DEFAULT);
+  analogReadResolution(10);
+  analogReadAveraging(32);
+  delay(500);
   
-  tft.print("V:");
+  int mv1 = 1195*1024/analogRead(71); //3v3 in at Teensy
+  tft.print("VCC:");
   tft.print(mv1);
   #ifdef USE_VIN_ADC
-   
-    tft.print(" VCC ");
+    delay(500); // give the system some time to setup 
+    adc->setAveraging(32, ADC_0); // set number of averages
+    adc->setResolution(12,ADC_0); // set bits of resolution
+    adc->setReference(ADC_REFERENCE::REF_1V2, ADC_0);
+    adc->setConversionSpeed(ADC_CONVERSION_SPEED::LOW_SPEED,ADC_0); // change the conversion speed
+    adc->setSamplingSpeed(ADC_SAMPLING_SPEED::LOW_SPEED,ADC_0); // change the sampling speed
+    //R1=17.33K R2=2.161 RT=19.49  2.161/19.49=0.111
+    delay(500); // give the system some time to setup 
+    VIN= (adc->analogRead(A3))*2.702;///1024; //rough estimate of battery on VIN based on measurements
+    
+    tft.print(" VIN ");
     tft.println(VIN);
    
   #endif 
-  delay(3000); //wait 3 seconds to clearly show the data
+  delay(2000); //wait 3 seconds to clearly show the data
   tft.fillScreen(COLOR_BLACK);
   tft.setCursor(0, 0);
   tft.setScrollarea(TOP_OFFSET,BOTTOM_OFFSET);
@@ -2864,8 +3274,17 @@ void loop()
     #ifdef USERECORD
     continueRecording();
     #endif
+    if (recorderActive)
+    {//if we are recording and auto_rec is on always stop recording after AREC_D seconds 
+     if ((AUTO_REC) and (recording_running>(AREC_D*1000)))
+     {stopRecording();
+      recorderActive=false;
+      delay(100);
+      recording_stopped=0;
+      
+      }
+    }
   }
-
   if (LeftButton_Mode == MODE_PLAY) 
   {if (playActive)
       {continuePlaying();
@@ -2877,7 +3296,7 @@ void loop()
   // during recording screens are not updated to reduce interference !
  if (not recorderActive)
   { update_Encoders();
-    #ifdef USETFT
+    #ifdef USE_TFT
     update_Display();
     #endif
    
@@ -2886,7 +3305,7 @@ void loop()
   struct tm tx = seconds2time(RTC_TSR);
    
   if (tx.tm_min!=old_time_min)
-  { tft.setFont(Arial_16);
+  { tft.setFont(TFT_FONT);
     tft.setCursor(180,20);
     tft.fillRect(150,20,90,20,MENU_BCK_COLOR);
     tft.setTextColor(ENC_MENU_COLOR);
@@ -2897,6 +3316,8 @@ void loop()
     #ifdef USE_VIN_ADC
      VIN= (adc->analogRead(A3))*2.702; //empirical !!
     #endif  
+    A_mem_max= AudioMemoryUsageMax();
+    A_cpu_max= AudioProcessorUsageMax();
 
    }
 
