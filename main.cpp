@@ -1130,7 +1130,7 @@ void update_display() {
      }  
 
     // show a scale with ticks for every 10kHz except for no_graph or settings_page
-    if ((display_mode!=settings_page) and (display_mode!=settings_page) and (AUTO_REC==false))
+    if ((display_mode!=settings_page) and (display_mode!=settings1_page) and (AUTO_REC==false))
      {if (display_mode>0)
       { 
         float x_factor=10000/(0.5*(SR_real/FFT_points));
