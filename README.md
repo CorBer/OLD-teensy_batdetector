@@ -1,6 +1,6 @@
 # teensy_batdetector (older-version)
 # this repository is outdated. The new repository can be found at: 
-https://github.com/CorBer/teensybat_V1_beta
+https://github.com/CorBer/teensy_batdetector
 
 Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
