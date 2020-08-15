@@ -1,12 +1,12 @@
-# teensy_batdetector
+# teensy_batdetector (older-version)
+# this repository is outdated. The new repository can be found at: 
+https://github.com/CorBer/teensybat_V1_beta
+
 Batdetector on Teensy3.6 (Based on original-code from Frank (DD4WH)
 https://github.com/DD4WH/Teensy-Bat-Detector )
 
 <b>Hardware:</b>
 Edwin (PE1WF) has developed a great PCB to build these detectors. More details can be found at https://forum.pjrc.com/threads/38988-Bat-detector?p=212852&viewfull=1#post212852 
-
-<b>* v1.0beta 20200722 </b>
-coming soon
 
 <b>* v0.99/v.100 </b> 
 several initial changes to allow automatic recording. This will allow the detector to wait for a signal in a band of the spectrum and start recording X (user set) seconds. After this it will wait Y (user set) seconds before trying to detect the next signal.
